@@ -26,7 +26,7 @@ object VideoColourTreatmentPolicy {
     fun visible(mode: RenderMode): Boolean = mode != RenderMode.AUDIO
     fun selectedIndex(settings: AudioSettings): Int = settings.videoEffect.ordinal
     fun selection(index: Int): VideoEffect? = VideoEffect.entries.getOrNull(index)
-    fun mutable(captureActive: Boolean): Boolean = !captureActive
+    fun mutable(captureActive: Boolean): Boolean = true
 }
 
 /** Pure selector state prevents a stale enum index from crossing capture-mode catalogues. */
@@ -49,10 +49,11 @@ object LiveRendererSettings {
     private var parameters: EffectParameters? = null
     private var brightness: Float? = null
     private var sensitivity: Float? = null
+    private var videoSaturationPercent: Int? = null
 
 
-    @Synchronized fun begin() { active = true; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null }
-    @Synchronized fun end() { active = false; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null }
+    @Synchronized fun begin() { active = true; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null }
+    @Synchronized fun end() { active = false; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null }
     @Synchronized fun setEffect(value: Effect) { if (active) effect = value }
     @Synchronized fun setVideoEffect(value: VideoEffect) { if (active) videoEffect = value }
     @Synchronized fun setVideoAudioEffect(value: VideoAudioEffect) { if (active) videoAudioEffect = value }
@@ -61,6 +62,7 @@ object LiveRendererSettings {
     /** These are renderer-local scalars; neither alters an admitted route or capture buffers. */
     @Synchronized fun setBrightness(value: Float) { if (active && value in 0f..1f) brightness = value }
     @Synchronized fun setSensitivity(value: Float) { if (active && value in .25f..3.25f) sensitivity = value }
+    @Synchronized fun setVideoSaturationPercent(value: Int) { if (active && VideoSaturationPolicy.valid(value)) videoSaturationPercent = value }
     /** Consecutive live edits use the last live value, not a stale persisted snapshot. */
     @Synchronized fun updateParameters(persisted: EffectParameters, transform: (EffectParameters) -> EffectParameters) {
         transform(parameters ?: persisted).takeIf(EffectParameters::valid)?.let { parameters = it }
@@ -72,11 +74,12 @@ object LiveRendererSettings {
         effectParameters = parameters ?: settings.effectParameters,
         brightness = brightness ?: settings.brightness,
         sensitivity = sensitivity ?: settings.sensitivity,
+        videoSaturationPercent = videoSaturationPercent ?: settings.videoSaturationPercent,
     )
 }
 
 /** Only these controls are read atomically by the active renderer. Route/capture controls remain locked. */
 object LiveRendererControlPolicy {
-    val sliderLabels = setOf("Чутливість", "Яскравість", "Швидкість", "Слід", "Поріг біту", "Зсув палітри")
+    val sliderLabels = setOf("Чутливість", "Яскравість", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри")
     fun sliderMutable(label: String) = label in sliderLabels
 }

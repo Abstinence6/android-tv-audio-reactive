@@ -3,6 +3,9 @@ package org.hyperion.audioreactive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 class RuntimeSettingsTest {
     @Test fun restoredSettingsDriveRuntime() {
@@ -67,12 +70,16 @@ class RuntimeSettingsTest {
             VideoQuality.BALANCED to SourceFrameSpec(112, 63, 20),
             VideoQuality.STANDARD to SourceFrameSpec(128, 72, 20),
             VideoQuality.HIGH to SourceFrameSpec(160, 90, 20),
+            VideoQuality.VERY_HIGH to SourceFrameSpec(192, 108, 20),
+            VideoQuality.ULTRA to SourceFrameSpec(256, 144, 20),
+            VideoQuality.MAXIMUM to SourceFrameSpec(320, 180, 20),
         )
         assertEquals(expected.map { it.first }, VideoQuality.entries)
         expected.forEach { (quality, frame) ->
             assertEquals(frame, AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO, videoQuality = quality).sourceFrame())
             assertTrue(frame.bytes <= HyperionFlatbuffer.MAX_IMAGE_BYTES)
         }
+        assertEquals(HyperionFlatbuffer.MAX_IMAGE_BYTES, expected.last().second.bytes)
     }
 
     @Test fun missingLegacyOutputSelectionMigratesToHyperionDefault() {
@@ -110,6 +117,33 @@ class RuntimeSettingsTest {
         assertEquals(SourceFrameSpec(256, 1, saved.fps), saved.captureFrame())
         assertEquals(SourceFrameSpec(128,72,saved.fps), saved.copy(renderMode = RenderMode.VIDEO).captureFrame())
         assertEquals(SourceFrameSpec(16, 1, saved.fps), saved.copy(outputMode = OutputMode.HYPERION).captureFrame())
+    }
+
+    @Test fun concurrentUpdatesTransformAndPersistUnderOneLockWithoutLostMutation() {
+        RuntimeSettings.initialize(MemoryStore(null))
+        val transformEntered = CountDownLatch(1)
+        val releaseFirstTransform = CountDownLatch(1)
+        val secondAttempted = CountDownLatch(1)
+        val completed = CountDownLatch(2)
+        thread {
+            RuntimeSettings.update {
+                transformEntered.countDown()
+                assertTrue(releaseFirstTransform.await(2, TimeUnit.SECONDS))
+                it.copy(brightness = .4f)
+            }
+            completed.countDown()
+        }
+        assertTrue(transformEntered.await(2, TimeUnit.SECONDS))
+        thread {
+            secondAttempted.countDown()
+            RuntimeSettings.update { it.copy(sensitivity = 2f) }
+            completed.countDown()
+        }
+        assertTrue(secondAttempted.await(2, TimeUnit.SECONDS))
+        releaseFirstTransform.countDown()
+        assertTrue(completed.await(2, TimeUnit.SECONDS))
+        assertEquals(.4f, RuntimeSettings.snapshot().brightness)
+        assertEquals(2f, RuntimeSettings.snapshot().sensitivity)
     }
 
     private class MemoryStore(initial: AudioSettings?) : AudioSettingsStore {

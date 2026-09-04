@@ -29,11 +29,11 @@ class VideoModePolicyTest {
         }
     }
 
-    @Test fun videoSaturationHasTheRequiredBoundsDefaultAndInactiveOnlyPolicy() {
+    @Test fun videoSaturationHasTheRequiredBoundsDefaultAndLiveMutablePolicy() {
         assertEquals(125, VideoSaturationPolicy.DEFAULT_PERCENT)
         assertEquals(VideoSaturationPolicy.DEFAULT_PERCENT, AudioSettings.defaults().videoSaturationPercent)
         assertTrue(VideoSaturationPolicy.valid(0)); assertTrue(VideoSaturationPolicy.valid(200)); assertFalse(VideoSaturationPolicy.valid(201))
-        assertTrue(VideoSaturationPolicy.mutable(false)); assertFalse(VideoSaturationPolicy.mutable(true))
+        assertTrue(VideoSaturationPolicy.mutable(false)); assertTrue(VideoSaturationPolicy.mutable(true))
         assertFalse(AudioSettings.defaults().copy(videoSaturationPercent = 201).valid())
     }
 
@@ -46,7 +46,7 @@ class VideoModePolicyTest {
         assertEquals(VideoEffect.CONTRAST.ordinal, VideoColourTreatmentPolicy.selectedIndex(mixed))
         assertEquals(VideoEffect.SATURATION, VideoColourTreatmentPolicy.selection(VideoEffect.SATURATION.ordinal))
         assertNull(VideoColourTreatmentPolicy.selection(VideoEffect.entries.size))
-        assertTrue(VideoColourTreatmentPolicy.mutable(false)); assertFalse(VideoColourTreatmentPolicy.mutable(true))
+        assertTrue(VideoColourTreatmentPolicy.mutable(false)); assertTrue(VideoColourTreatmentPolicy.mutable(true))
         assertEquals(listOf("Brightness pulse", "Beat pulse", "EQ", "Comet", "Ripple", "Bass sweep"), EffectSelectorPolicy.labels(mixed))
     }
 
@@ -77,6 +77,23 @@ class VideoModePolicyTest {
         val silence = processor.compose(null, base.copy(videoEffect = VideoEffect.SATURATION, videoSaturationPercent = 100)).copyOf()
         assertFalse(brightness.contentEquals(eq))
         for (i in 0..2) assertTrue((brightness[i].toInt() and 255) >= (silence[i].toInt() and 255))
+    }
+
+    @Test fun liveVideoTreatmentAndSaturationChangeVideoAndVideoAudioWithoutPersisting() {
+        val processor = processorWith(40, 80, 120)
+        val persisted = AudioSettings.defaults().copy(brightness = 1f, videoEffect = VideoEffect.NORMAL, videoSaturationPercent = 125)
+        LiveRendererSettings.begin()
+        try {
+            LiveRendererSettings.setVideoEffect(VideoEffect.SATURATION)
+            LiveRendererSettings.setVideoSaturationPercent(0)
+            val live = LiveRendererSettings.apply(persisted)
+            assertEquals(VideoEffect.NORMAL, persisted.videoEffect)
+            assertEquals(125, persisted.videoSaturationPercent)
+            assertEquals(VideoEffect.SATURATION, live.videoEffect)
+            assertEquals(0, live.videoSaturationPercent)
+            assertArrayEquals(byteArrayOf(80, 80, 80), processor.compose(null, live.copy(renderMode = RenderMode.VIDEO)).copyOf())
+            assertArrayEquals(byteArrayOf(80, 80, 80), processor.compose(null, live.copy(renderMode = RenderMode.VIDEO_AUDIO)).copyOf())
+        } finally { LiveRendererSettings.end() }
     }
 
     @Test fun tabsAreFixedDpadButtonPanelsWithExactlyOneVisible() {

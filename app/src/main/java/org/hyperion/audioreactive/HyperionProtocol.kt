@@ -19,9 +19,9 @@ object HyperionFlatbuffer {
     private const val IMAGE = 2
     private const val CLEAR = 3
     private const val RAW_IMAGE = 1
-    /** Audio remains 16×1; video is a full source image, baseline 128×72. */
-    const val MAX_IMAGE_WIDTH = 160
-    const val MAX_IMAGE_HEIGHT = 90
+    /** Audio remains 16×1; video is bounded by the native 320×180 capture producer. */
+    const val MAX_IMAGE_WIDTH = 320
+    const val MAX_IMAGE_HEIGHT = 180
     const val MAX_IMAGE_BYTES = MAX_IMAGE_WIDTH * MAX_IMAGE_HEIGHT * 3
     const val AUDIO_WIDTH = 16
     const val AUDIO_HEIGHT = 1

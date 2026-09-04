@@ -1,5 +1,6 @@
 package org.hyperion.audioreactive
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -141,7 +142,15 @@ class AudioCoreTest {
         assertTrue(frame.all { it == 0.toByte() })
         val smoother = RgbFrameSmoother(frame.size)
         smoother.apply(ByteArray(frame.size) { 100.toByte() })
-        assertTrue(smoother.apply(frame, immediateBlack = true).all { it == 0.toByte() })
+        assertTrue(smoother.apply(frame, FrameSmoothingPolicy.immediateBlack(0f, typicalFeatures.signalPresent)).all { it == 0.toByte() })
+    }
+
+    @Test fun zeroBrightnessImmediatelyClearsPrefilledSmoothersForAudioAndVideo() {
+        val audio = RgbFrameSmoother(3).also { it.apply(byteArrayOf(90, 90, 90)) }
+        val video = RgbFrameSmoother(3).also { it.apply(byteArrayOf(90, 90, 90)) }
+        val black = byteArrayOf(0, 0, 0)
+        assertTrue(audio.apply(black, FrameSmoothingPolicy.immediateBlack(0f, true)).all { it == 0.toByte() })
+        assertTrue(video.apply(black, FrameSmoothingPolicy.immediateBlack(0f, null)).all { it == 0.toByte() })
     }
 
     @Test fun analyzerAndRendererKeepReusableCaptureBuffersAfterWarmup() {
@@ -246,18 +255,26 @@ class AudioCoreTest {
         assertEquals(3, raw.fieldCount); assertEquals(16, raw.intField(1)); assertEquals(1, raw.intField(2)); assertTrue(rgb.contentEquals(raw.vectorField(0)))
     }
 
-    @Test fun rawImageRejectsUnboundedDimensionsOrIncorrectRgbCount() {
-        assertFails { HyperionFlatbuffer.rawImage(ByteArray(48), 17, 1) }
+    @Test fun rawImageAcceptsAndDecodesMaximumHyperionCeilingAndRejectsOversizedDimensions() {
+        val rgb = ByteArray(320 * 180 * 3) { (it * 31).toByte() }
+        val payload = HyperionFlatbuffer.rawImage(rgb, 320, 180)
+        val (_, image) = decodeRequest(payload, 2)
+        val raw = image.tableField(1)
+        assertEquals(320, raw.intField(1)); assertEquals(180, raw.intField(2)); assertTrue(rgb.contentEquals(raw.vectorField(0)))
+        assertFails { HyperionFlatbuffer.rawImage(ByteArray(321 * 180 * 3), 321, 180) }
+        assertFails { HyperionFlatbuffer.rawImage(ByteArray(320 * 181 * 3), 320, 181) }
         assertFails { HyperionFlatbuffer.rawImage(ByteArray(47), 16, 1) }
     }
 
-    @Test fun reusableRawImageFrameKeepsOneFramedBufferAndUpdatesRgbData() {
-        val writer = HyperionFlatbuffer.RawImageFrame()
-        val first = writer.write(ByteArray(48) { it.toByte() })
-        val secondRgb = ByteArray(48) { (47 - it).toByte() }
+    @Test fun maximumRawImageFrameReusesBufferHasBigEndianPrefixAndPreservesRgbData() {
+        val writer = HyperionFlatbuffer.RawImageFrame(320, 180)
+        val first = writer.write(ByteArray(320 * 180 * 3) { it.toByte() })
+        val secondRgb = ByteArray(320 * 180 * 3) { (it * 17).toByte() }
         val second = writer.write(secondRgb)
         assertSame(first, second)
-        assertEquals(132, ByteBuffer.wrap(second, 0, 4).order(ByteOrder.BIG_ENDIAN).int)
+        val expectedPayloadSize = 84 + 320 * 180 * 3
+        assertArrayEquals(byteArrayOf((expectedPayloadSize ushr 24).toByte(), (expectedPayloadSize ushr 16).toByte(), (expectedPayloadSize ushr 8).toByte(), expectedPayloadSize.toByte()), second.copyOfRange(0, 4))
+        assertEquals(expectedPayloadSize, ByteBuffer.wrap(second, 0, 4).order(ByteOrder.BIG_ENDIAN).int)
         val (_, image) = decodeRequest(second.copyOfRange(4, second.size), 2)
         assertTrue(secondRgb.contentEquals(image.tableField(1).vectorField(0)))
     }

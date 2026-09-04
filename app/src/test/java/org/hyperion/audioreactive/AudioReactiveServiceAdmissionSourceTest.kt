@@ -26,4 +26,9 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("private fun broadcastAdmissionFailed(generation:Long)"))
         assertTrue(source.contains("broadcastAdmissionFailed(generation)"))
     }
+
+    @Test fun videoCaptureProducerIsFixedAtMaximumHyperionDimensions() {
+        assertTrue(source.contains("ImageReader.newInstance(320,180,android.graphics.PixelFormat.RGBA_8888,2)"))
+        assertTrue(source.contains("p.createVirtualDisplay(\"audio-reactive-video\",320,180,1,"))
+    }
 }

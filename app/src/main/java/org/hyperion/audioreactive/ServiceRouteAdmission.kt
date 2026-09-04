@@ -14,9 +14,12 @@ internal class ServiceRouteAdmission(private val discard: (RouteBindingIds) -> U
     private var state = State.IDLE
     private var pending: RouteBindingIds? = null
 
-    /** Reserves one admission; a concurrent/duplicate intent loses and has its own IDs discarded. */
+    /** Reserves one admission; replay of the same intent leaves its pending handoff intact. */
     @Synchronized fun reserve(ids: RouteBindingIds): Boolean {
         if (state != State.IDLE) {
+            // A framework replay may carry the exact same one-shot IDs. It belongs to the
+            // current admission and must never discard that admission's pending binding.
+            if (state == State.PENDING && pending == ids) return false
             discard(ids)
             return false
         }

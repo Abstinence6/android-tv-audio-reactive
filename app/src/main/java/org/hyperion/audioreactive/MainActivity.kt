@@ -54,6 +54,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private val captureToggleCoordinator = CaptureToggleCoordinator(this)
     private val work = Executors.newSingleThreadExecutor()
     private val capturePreflightGeneration = AtomicLong()
+    private val discoveryAdmissionGeneration = AtomicLong()
     private val rainbowHandler = Handler(Looper.getMainLooper())
     private var rainbowHue = 0f
     private lateinit var contentRoot: LinearLayout
@@ -304,19 +305,21 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    if (suppressVideoColourTreatmentSelection || !VideoColourTreatmentPolicy.mutable(AudioReactiveService.exists())) return
-                    VideoColourTreatmentPolicy.selection(position)?.let { treatment -> RuntimeSettings.update { it.copy(videoEffect = treatment) } }
+                    if (suppressVideoColourTreatmentSelection) return
+                    VideoColourTreatmentPolicy.selection(position)?.let { treatment ->
+                        if (AudioReactiveService.exists()) LiveRendererSettings.setVideoEffect(treatment)
+                        else RuntimeSettings.update { it.copy(videoEffect = treatment) }
+                    }
                 }
             }
         }
         videoColourTreatmentRow.addView(videoColourTreatmentSpinner)
         panel.addView(videoColourTreatmentRow)
-        modeMutableRows += videoColourTreatmentRow
         videoSaturationRow = sliderRow("Насиченість відео", RuntimeSettings.snapshot().videoSaturationPercent, VideoSaturationPolicy.MAX_PERCENT, { "$it%" }) { value ->
-            if (VideoSaturationPolicy.mutable(AudioReactiveService.exists())) RuntimeSettings.update { it.copy(videoSaturationPercent = value) }
+            if (AudioReactiveService.exists()) LiveRendererSettings.setVideoSaturationPercent(value)
+            else RuntimeSettings.update { it.copy(videoSaturationPercent = value) }
         }
         panel.addView(videoSaturationRow)
-        modeMutableRows += videoSaturationRow
         sliderRow("Швидкість", ((RuntimeSettings.snapshot().effectParameters.speed - .25f) / .25f).toInt(), 11, { "${.25f + it * .25f}×" }) { v -> updateEffectParameters { it.copy(speed = .25f + v * .25f) } }.also { panel.addView(it) }
         sliderRow("Слід", (RuntimeSettings.snapshot().effectParameters.trail * 10).toInt(), 10, { "${it * 10}%" }) { v -> updateEffectParameters { it.copy(trail = v / 10f) } }.also { panel.addView(it) }
         sliderRow("Поріг біту", ((RuntimeSettings.snapshot().effectParameters.beatThreshold - .05f) / .05f).toInt(), 18, { "${5 + it * 5}%" }) { v -> updateEffectParameters { it.copy(beatThreshold = .05f + v * .05f) } }.also { panel.addView(it) }
@@ -408,6 +411,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     /** Discovery is read-only and is triggered explicitly or after the user selects Hyperion. */
     private fun discover(mode: OutputMode) {
         if (AudioReactiveService.exists()) return
+        val discoveryGeneration = discoveryAdmissionGeneration.get()
         status.text = "Шукаю локальні ${mode.label}…"
         discoverButton.isEnabled = false
         work.execute {
@@ -415,7 +419,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 OutputMode.WLED -> {
                     val found = WledDiscovery.scan()
                     runOnUiThread {
-                        if (!isFinishing && RuntimeSettings.snapshot().outputMode == mode) {
+                        if (canMergeDiscovery(discoveryGeneration, mode)) {
                             latestWled = found.map { it.identity }.toSet()
                             RuntimeSettings.update { it.copy(wledDevices = WledInventory.merge(it.wledDevices, found)) }
                             status.text = "Знайдено WLED: ${found.size}"
@@ -427,7 +431,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 OutputMode.HYPERION -> {
                     val found = HyperionDiscovery.scan()
                     runOnUiThread {
-                        if (!isFinishing && RuntimeSettings.snapshot().outputMode == mode) {
+                        if (canMergeDiscovery(discoveryGeneration, mode)) {
                             latestHyperion = found.map { it.identity }.toSet()
                             RuntimeSettings.update { it.copy(hyperionDevices = HyperionInventory.merge(it.hyperionDevices, found)) }
                             status.text = "Знайдено Hyperion: ${found.size}"
@@ -439,6 +443,14 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             }
         }
     }
+
+    /** Recheck the idle admission epoch on the UI thread immediately before any inventory write. */
+    private fun canMergeDiscovery(queuedGeneration: Long, mode: OutputMode): Boolean =
+        !isFinishing && RuntimeSettings.snapshot().outputMode == mode && DiscoveryCompletionPolicy.mayMerge(
+            queuedGeneration,
+            discoveryAdmissionGeneration.get(),
+            AudioReactiveService.exists() || captureAdmissionLocked,
+        )
 
     /** Visual source only: it changes this Activity's background and starts no capture/output path. */
     private fun showRainbowVisualSource() {
@@ -667,6 +679,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
     override fun prepareOutputForCapture(admissionGeneration: Long, onReady: () -> Unit, onDenied: () -> Unit) {
         invalidatePendingCaptureAdmission()
+        discoveryAdmissionGeneration.incrementAndGet()
         pendingAdmissionGeneration = admissionGeneration
         val settings = RuntimeSettings.snapshot()
         val generation = capturePreflightGeneration.incrementAndGet()

@@ -82,7 +82,7 @@ object VideoSaturationPolicy {
     const val MAX_PERCENT = 200
     const val DEFAULT_PERCENT = 125
     fun valid(value: Int) = value in MIN_PERCENT..MAX_PERCENT
-    fun mutable(captureActive: Boolean) = !captureActive
+    fun mutable(captureActive: Boolean) = true
 }
 
 /** A protected or sustained-black image must clear the last displayed output before capture ends. */

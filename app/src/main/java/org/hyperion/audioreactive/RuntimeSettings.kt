@@ -11,7 +11,10 @@ enum class VideoQuality(val width: Int, val height: Int, val label: String) {
     LOW(96, 54, "Низька — 96×54 RGB24"),
     BALANCED(112, 63, "Збалансована — 112×63 RGB24"),
     STANDARD(128, 72, "Стандартна — 128×72 RGB24"),
-    HIGH(160, 90, "Висока — 160×90 RGB24");
+    HIGH(160, 90, "Висока — 160×90 RGB24"),
+    VERY_HIGH(192, 108, "Дуже висока — 192×108 RGB24"),
+    ULTRA(256, 144, "Ультра — 256×144 RGB24"),
+    MAXIMUM(320, 180, "Максимальна — 320×180 RGB24");
     companion object { fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: STANDARD }
 }
 object VideoCapturePolicy {
@@ -96,14 +99,19 @@ object RuntimeSettings {
     private val listeners = mutableSetOf<(AudioSettings) -> Unit>()
     @Synchronized fun initialize(s: AudioSettingsStore) { store = s; current = s.load()?.takeIf { it.valid() } ?: AudioSettings.defaults() }
     @Synchronized fun snapshot() = current
-    fun apply(s: AudioSettings) {
+    fun apply(s: AudioSettings) = replaceLocked { s }
+    fun update(transform: (AudioSettings) -> AudioSettings): AudioSettings = replaceLocked(transform)
+    private fun replaceLocked(transform: (AudioSettings) -> AudioSettings): AudioSettings {
+        val next: AudioSettings
         val observers: List<(AudioSettings) -> Unit>
-        synchronized(this) { require(s.valid()); store.save(s); current = s; observers = listeners.toList() }
-        observers.forEach { it(s) }
-    }
-    fun update(transform: (AudioSettings) -> AudioSettings): AudioSettings {
-        val next = synchronized(this) { transform(current) }
-        apply(next)
+        synchronized(this) {
+            next = transform(current)
+            require(next.valid())
+            store.save(next)
+            current = next
+            observers = listeners.toList()
+        }
+        observers.forEach { it(next) }
         return next
     }
     @Synchronized fun addListener(listener: (AudioSettings) -> Unit) { listeners += listener }

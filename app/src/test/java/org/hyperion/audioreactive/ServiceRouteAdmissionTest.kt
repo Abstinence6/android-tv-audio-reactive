@@ -20,6 +20,18 @@ class ServiceRouteAdmissionTest {
         assertEquals(listOf(second), discarded)
     }
 
+    @Test fun replayedIntentWithTheSamePendingIdsCannotDiscardTheFirstBinding() {
+        val discarded = mutableListOf<RouteBindingIds>()
+        val admission = ServiceRouteAdmission { discarded += it }
+        val first = RouteBindingIds("same-wled", null)
+
+        assertTrue(admission.reserve(first))
+        assertFalse(admission.reserve(first))
+        assertTrue(discarded.isEmpty())
+        assertEquals("router", admission.consume { "router" })
+        assertTrue(discarded.isEmpty())
+    }
+
     @Test fun destructionBeforeConsumptionDiscardsTheExactReservedBinding() {
         val discarded = mutableListOf<RouteBindingIds>()
         val admission = ServiceRouteAdmission { discarded += it }
