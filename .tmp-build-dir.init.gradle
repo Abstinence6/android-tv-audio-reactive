@@ -1,0 +1,3 @@
+allprojects {
+    buildDir = file(System.getenv("HERMES_GRADLE_BUILD_DIR") + "/" + project.name)
+}

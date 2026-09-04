@@ -1,0 +1,20 @@
+.gradle/
+build/
+local.properties
+**/build/
+.idea/
+
+# Local build/tool caches and local Android artifacts; never publish these.
+.kotlin/
+.toolchains/
+.tools/
+platform-tools/
+*.apk
+*.aab
+*.zip
+*.zip.sha256
+signing*.properties
+mqtt*-readback.txt
+mqtt_retained_watch.py
+*.png
+ui-*.xml

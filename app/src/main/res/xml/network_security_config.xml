@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Cleartext is denied globally; listed LAN hosts are explicit exceptions. MQTT additionally pins .1 to port 1883 in MqttContract. -->
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+
+        <domain includeSubdomains="false">192.168.1.1</domain>
+        <domain includeSubdomains="false">192.168.1.152</domain>
+        <domain includeSubdomains="false">192.168.1.153</domain>
+        <domain includeSubdomains="false">192.168.1.158</domain>
+    </domain-config>
+</network-security-config>
