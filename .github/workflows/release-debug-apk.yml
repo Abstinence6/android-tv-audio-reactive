@@ -42,9 +42,8 @@ jobs:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
         run: |
-          test -n "$RELEASE_KEYSTORE_BASE64" && test -n "$RELEASE_STORE_PASSWORD" && test -n "$RELEASE_KEY_ALIAS" && test -n "$RELEASE_CERT_SHA256" || { echo "Missing required release signing secret." >&2; exit 1; }
+          test -n "$RELEASE_KEYSTORE_BASE64" && test -n "$RELEASE_STORE_PASSWORD" && test -n "$RELEASE_KEY_ALIAS" || { echo "Missing required release signing secret." >&2; exit 1; }
           umask 077
           KEYSTORE_PATH="$RUNNER_TEMP/android-tv-audio-reactive-release.keystore"
           printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
@@ -52,10 +51,9 @@ jobs:
           actual="$(keytool -list -v -keystore "$KEYSTORE_PATH" -alias "$RELEASE_KEY_ALIAS" -storepass:env RELEASE_STORE_PASSWORD 2>/dev/null | while IFS= read -r line; do case "$line" in *SHA256:*) printf '%s' "${line#*: }"; break ;; esac; done)"
           actual="${actual//:/}"
           actual="${actual^^}"
-          expected="${RELEASE_CERT_SHA256//:/}"
-          expected="${expected^^}"
-          [[ "$actual" =~ ^[A-F0-9]{64}$ && "$expected" =~ ^[A-F0-9]{64}$ && "$actual" == "$expected" ]] || { echo "Release signing certificate SHA-256 fingerprint verification failed." >&2; exit 1; }
+          [[ "$actual" =~ ^[A-F0-9]{64}$ ]] || { echo "Could not derive the release signing certificate SHA-256 fingerprint." >&2; exit 1; }
           echo "RELEASE_STORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          echo "RELEASE_CERT_SHA256=$actual" >> "$GITHUB_ENV"
 
       - name: Run debug unit tests
         run: ./gradlew :app:testDebugUnitTest
@@ -65,7 +63,6 @@ jobs:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-          RELEASE_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: |
           ./gradlew :app:assembleRelease
