@@ -73,6 +73,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var status: TextView
     private lateinit var captureButton: Button
     private lateinit var testButton: Button
+    private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
     private lateinit var videoBox: CheckBox
     private lateinit var effectSpinner: Spinner
@@ -90,6 +91,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var additionalTab: TextView
     private val tabPanels = mutableListOf<View>()
     private val modeMutableRows = mutableListOf<View>()
+    private lateinit var releaseUpdater: GitHubReleaseUpdater
 
     private var suppressModeCallbacks = false
     private var suppressOutputCallbacks = false
@@ -172,6 +174,29 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         showTab(0)
         refreshCaptureUi()
         captureButton.requestFocus()
+        releaseUpdater = GitHubReleaseUpdater(
+            applicationContext,
+            onStatus = { message, busy ->
+                if (!isFinishing && !isDestroyed) {
+                    status.text = message
+                    updateButton.isEnabled = !busy
+                }
+            },
+            onUpdateAvailable = {
+                if (!isFinishing && !isDestroyed) {
+                    updateButton.text = "Завантажити оновлення"
+                    updateButton.setOnClickListener { releaseUpdater.downloadSelectedUpdate() }
+                }
+            },
+            onReadyToInstall = {
+                if (!isFinishing && !isDestroyed) {
+                    updateButton.text = "Встановити оновлення"
+                    updateButton.setOnClickListener { releaseUpdater.installDownloadedUpdate() }
+                }
+            },
+        )
+        // Launch check fetches release metadata only; download and installation need separate D-pad actions.
+        releaseUpdater.checkForUpdate()
         handleRemoteAction(intent)
     }
 
@@ -229,6 +254,12 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             text = "Тестове зображення змінює лише локальний повноекранний фон і доступне під час захоплення. Не запускає MediaProjection, маршрути, сокети або мережевий вихід. ${TestFrameActionPolicy.ACTIVE_CAPTURE_REASON}"
         })
         panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })
+        updateButton = Button(this).apply {
+            text = "Перевірити оновлення"
+            contentDescription = "Перевірити GitHub Releases лише за метаданими; завантаження і встановлення потребують окремих дій"
+            setOnClickListener { releaseUpdater.checkForUpdate() }
+        }
+        panel.addView(updateButton)
     }
 
     /** Compatible selector stays enabled: while active it mutates renderer-local state only. */
@@ -556,7 +587,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     override fun onStart() { super.onStart(); ContextCompat.registerReceiver(this, receiver, IntentFilter(AudioReactiveService.ACTION_CAPTURE_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED) }
     override fun onResume() { super.onResume(); refreshCaptureUi(true) }
     override fun onStop() { unregisterReceiver(receiver); super.onStop() }
-    override fun onDestroy() { invalidatePendingCaptureAdmission(); captureToggleCoordinator.invalidatePending(); rainbowHandler.removeCallbacks(rainbowAnimator); RainbowVisualSourcePolicy.stop(); work.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() { invalidatePendingCaptureAdmission(); captureToggleCoordinator.invalidatePending(); rainbowHandler.removeCallbacks(rainbowAnimator); RainbowVisualSourcePolicy.stop(); releaseUpdater.close(); work.shutdownNow(); super.onDestroy() }
     private fun handleCaptureToggle() { captureToggleCoordinator.toggle(); refreshCaptureUi() }
 
     private fun refreshCaptureUi(updateStatus: Boolean = false) {
