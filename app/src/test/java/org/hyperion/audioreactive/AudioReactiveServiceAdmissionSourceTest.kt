@@ -12,23 +12,34 @@ class AudioReactiveServiceAdmissionSourceTest {
         ).first(File::isFile).readText()
     }
 
-    @Test fun serviceReservesOneAdmissionAndConfirmsOnlyAfterRouteConsumption() {
-        assertTrue(source.contains("private val admission = ServiceRouteAdmission"))
-        assertTrue(source.contains("if(!admission.reserve(ids))"))
-        val consume = source.indexOf("router=admission.consume")
-        val confirmsAlive = source.indexOf("alive=true", consume)
-        val confirmsUi = source.indexOf("broadcast(generation)", confirmsAlive)
-        assertTrue(consume >= 0 && confirmsAlive > consume && confirmsUi > confirmsAlive)
+    @Test fun serviceGatesAdmissionAndForegroundStartupAgainstTeardown() {
+        assertTrue(source.contains("private val lifecycle = CaptureServiceLifecycle(::performTeardown)"))
+        assertTrue(source.contains("if(!lifecycle.beginStart { admission.reserve(ids) }) { admission.discardLifecycleRejectedStart(ids); return START_NOT_STICKY }"))
+        assertTrue(source.contains("if(!lifecycle.whileStarting { channel(); startForeground"))
     }
 
-    @Test fun serviceTeardownDiscardsOnlyUnconsumedPendingBindings() {
-        assertTrue(source.contains("admission.finish() // Discards only an unconsumed handoff"))
-        assertTrue(source.contains("private fun broadcastAdmissionFailed(generation:Long)"))
-        assertTrue(source.contains("broadcastAdmissionFailed(generation)"))
+    @Test fun invalidProjectionAndRouteAdmissionsUseOneTerminalTeardownPath() {
+        assertTrue(source.contains("data==null){rejectInvalidStart(generation);return START_NOT_STICKY}"))
+        assertTrue(source.contains("if(!valid){rejectInvalidStart(generation);return START_NOT_STICKY}"))
+        assertTrue(source.contains("private fun rejectInvalidStart(generation:Long){invalidAdmissionGeneration=generation;lifecycle.stop()}"))
+        assertTrue(source.contains("invalidAdmissionGeneration?.let{generation->invalidAdmissionGeneration=null;broadcastAdmissionFailed(generation)}?:broadcast()"))
     }
 
-    @Test fun videoCaptureProducerIsFixedAtMaximumHyperionDimensions() {
-        assertTrue(source.contains("ImageReader.newInstance(320,180,android.graphics.PixelFormat.RGBA_8888,2)"))
-        assertTrue(source.contains("p.createVirtualDisplay(\"audio-reactive-video\",320,180,1,"))
+    @Test fun serviceChecksCancellationAroundEachCaptureAcquire() {
+        assertTrue(source.contains("lifecycle.acquire(\n     acquire = { (getSystemService"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={createAudio(p)}"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={ImageReader.newInstance"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={p.createVirtualDisplay"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={ admission.consume"))
+    }
+
+    @Test fun serviceStopsRouterBeforeAdmissionAndRetainsPublicSafeFailureDiagnostic() {
+        val routerStop = source.indexOf("attempt(\"router\"){router?.stop()")
+        val admissionFinish = source.indexOf("attempt(\"admission\"){admission.finish()}")
+        assertTrue(routerStop >= 0 && admissionFinish > routerStop)
+        assertTrue(source.contains("STARTUP_FAILURE_DIAGNOSTIC"))
+        assertTrue(source.contains("CLEANUP_FAILURE_DIAGNOSTIC"))
+        assertTrue(source.contains("stopForeground(STOP_FOREGROUND_REMOVE)"))
+        assertTrue(source.contains("attempt(\"self\"){stopSelf()}"))
     }
 }

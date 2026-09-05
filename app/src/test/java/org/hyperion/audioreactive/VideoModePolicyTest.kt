@@ -64,6 +64,17 @@ class VideoModePolicyTest {
         assertTrue(output.all { it == 0.toByte() })
     }
 
+    @Test fun realtimeVideoCacheRetainsTheLastCompleteFrameWhenNoNewImageArrives() {
+        val cache = VideoRealtimeFrameCache()
+        val first = byteArrayOf(1, 2, 3)
+        assertNull(cache.current())
+        val retained = cache.update(first)
+        first.fill(9)
+        assertArrayEquals(byteArrayOf(1, 2, 3), cache.current())
+        assertSame(retained, cache.update(byteArrayOf(4, 5, 6)))
+        assertArrayEquals(byteArrayOf(4, 5, 6), cache.current())
+    }
+
     @Test fun videoAudioAppliesVideoSaturationAndOnlyAddsBrightnessModulation() {
         val processor = processorWith(40, 80, 120)
         val features = AudioFeatures(.4f, .9f, .2f, .8f, .3f, .7f, FloatArray(16) { if (it == 0) .1f else .9f }, true)

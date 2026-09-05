@@ -77,6 +77,19 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     companion object { const val BLACK_FRAME_HOLD = 30 }
 }
 
+/** Retains the last complete video output so realtime routes stay leased between producer frames. */
+internal class VideoRealtimeFrameCache {
+    private var frame = ByteArray(0)
+
+    fun update(source: ByteArray): ByteArray {
+        if (frame.size != source.size) frame = ByteArray(source.size)
+        source.copyInto(frame)
+        return frame
+    }
+
+    fun current(): ByteArray? = frame.takeIf { it.isNotEmpty() }
+}
+
 object VideoSaturationPolicy {
     const val MIN_PERCENT = 0
     const val MAX_PERCENT = 200

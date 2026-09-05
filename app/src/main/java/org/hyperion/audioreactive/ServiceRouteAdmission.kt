@@ -29,6 +29,15 @@ internal class ServiceRouteAdmission(private val discard: (RouteBindingIds) -> U
     }
 
     /**
+     * Discards an intent rejected by the lifecycle before it could reserve admission. A replay
+     * with the current pending IDs belongs to that pending handoff; every other incoming binding
+     * is unowned and must be discarded. Once active or stopped, no pending handoff remains.
+     */
+    @Synchronized fun discardLifecycleRejectedStart(ids: RouteBindingIds) {
+        if (state != State.PENDING || pending != ids) discard(ids)
+    }
+
+    /**
      * Constructs the router while ownership remains pending. On success the router owns the
      * consumed route; on failure the still-pending exact IDs are discarded.
      */
