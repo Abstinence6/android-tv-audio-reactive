@@ -21,6 +21,10 @@ val releaseSigningEnvironment = listOf(
 )
 val releaseSigningValues = releaseSigningEnvironment.associateWith { System.getenv(it)?.takeIf(String::isNotBlank) }
 val hasReleaseSigning = releaseSigningValues.values.all { it != null }
+val releaseCertificateFingerprint = System.getenv("RELEASE_CERT_SHA256")
+    ?.replace(":", "")
+    ?.lowercase()
+    ?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
 
 android {
     namespace = "org.hyperion.audioreactive"
@@ -32,6 +36,8 @@ android {
         versionCode = releaseVersion?.first ?: 2
         versionName = releaseVersion?.second ?: "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Debug builds are deliberately unable to install from the signed release channel.
+        buildConfigField("String", "RELEASE_CERT_SHA256", "\"\"")
     }
     signingConfigs {
         if (hasReleaseSigning) {
@@ -45,6 +51,8 @@ android {
     }
     buildTypes {
         getByName("release") {
+            // This value is set only on signed release variants after CI validates the secret.
+            buildConfigField("String", "RELEASE_CERT_SHA256", "\"${releaseCertificateFingerprint.orEmpty()}\"")
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -68,6 +76,9 @@ val validateReleaseInputs by tasks.registering {
         }
         check(file(requireNotNull(releaseSigningValues.getValue("RELEASE_STORE_FILE"))).isFile) {
             "RELEASE_STORE_FILE does not point to a readable keystore file."
+        }
+        check(releaseCertificateFingerprint != null) {
+            "RELEASE_CERT_SHA256 must be a SHA-256 certificate fingerprint (64 hexadecimal characters, optional colons)."
         }
     }
 }

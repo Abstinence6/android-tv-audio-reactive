@@ -69,6 +69,9 @@ object ReleaseUpdatePolicy {
         val match = Regex("^([0-9a-fA-F]{64})  ?${Regex.escape(assetName)}\\s*$").matchEntire(text.trim()) ?: return null
         return match.groupValues[1].lowercase()
     }
+    /** A release APK must have exactly the certificate pinned into this build. */
+    fun hasPinnedReleaseCertificate(signerDigests: Iterable<String>, pinnedFingerprint: String): Boolean =
+        pinnedFingerprint.matches(Regex("[0-9a-f]{64}")) && signerDigests.map(String::lowercase).sorted() == listOf(pinnedFingerprint)
 }
 
 class GitHubReleaseUpdater(
@@ -175,10 +178,11 @@ class GitHubReleaseUpdater(
         check(archive.packageName == BuildConfig.APPLICATION_ID)
         check(archive.versionName == "${expected.major}.${expected.minor}.${expected.patch}")
         check(archive.longVersionCode == expected.versionCode.toLong())
-        val installed = context.packageManager.getPackageInfo(BuildConfig.APPLICATION_ID, flags)
         val archiveSigning = requireNotNull(archive.signingInfo)
-        val installedSigning = requireNotNull(installed.signingInfo)
-        check(signerDigests(archiveSigning.apkContentsSigners) == signerDigests(installedSigning.apkContentsSigners))
+        check(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(
+            signerDigests(archiveSigning.apkContentsSigners),
+            BuildConfig.RELEASE_CERT_SHA256,
+        ))
         true
     }.getOrDefault(false)
 

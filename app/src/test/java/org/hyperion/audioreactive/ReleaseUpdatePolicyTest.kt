@@ -61,4 +61,12 @@ class ReleaseUpdatePolicyTest {
         assertNull(ReleaseUpdatePolicy.sha256FromSidecar("$hash  other.apk", asset))
         assertNull(ReleaseUpdatePolicy.sha256FromSidecar("not-a-hash  $asset", asset))
     }
+
+    @Test fun requiresExactlyThePinnedReleaseCertificate() {
+        val pin = "a".repeat(64)
+        assertTrue(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf(pin), pin))
+        assertFalse(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf("b".repeat(64)), pin))
+        assertFalse(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf(pin, "b".repeat(64)), pin))
+        assertFalse(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf(pin), "not-a-fingerprint"))
+    }
 }
