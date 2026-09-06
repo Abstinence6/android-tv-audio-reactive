@@ -1,6 +1,7 @@
 package org.hyperion.audioreactive
 
 import android.content.Context
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.Signature
@@ -72,17 +73,23 @@ object ReleaseUpdatePolicy {
     /** A release APK must have exactly the certificate pinned into this build. */
     fun hasPinnedReleaseCertificate(signerDigests: Iterable<String>, pinnedFingerprint: String): Boolean =
         pinnedFingerprint.matches(Regex("[0-9a-f]{64}")) && signerDigests.map(String::lowercase).sorted() == listOf(pinnedFingerprint)
+
+    /** Select exactly one platform-owned package installer; resolvers and third parties fail closed. */
+    data class InstallerCandidate(val packageName: String, val className: String, val isSystem: Boolean)
+    fun selectSystemInstaller(candidates: Iterable<InstallerCandidate>): InstallerCandidate? =
+        candidates.filter { it.isSystem }.distinctBy { it.packageName to it.className }.singleOrNull()
 }
 
 class GitHubReleaseUpdater(
     private val context: Context,
     private val onStatus: (String, Boolean) -> Unit,
     private val onUpdateAvailable: () -> Unit,
-    private val onReadyToInstall: () -> Unit,
 ) : AutoCloseable {
     private data class Release(val tag: String, val apkUrl: String, val checksumUrl: String)
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val closed = AtomicBoolean(false)
+    private val transferLock = Any()
+    @Volatile private var activeConnection: HttpURLConnection? = null
     @Volatile private var selectedRelease: Release? = null
     @Volatile private var downloadedApk: File? = null
 
@@ -98,7 +105,7 @@ class GitHubReleaseUpdater(
                     { release ->
                         selectedRelease = release
                         if (release == null) publish("Оновлень немає.", false)
-                        else { publish("Оновлення доступне. Виберіть «Завантажити оновлення».", false); onUpdateAvailable() }
+                        else { publish("Оновлення доступне. Виберіть «Оновити».", false); onUpdateAvailable() }
                     },
                     { publish("Не вдалося перевірити оновлення.", false) },
                 )
@@ -106,32 +113,45 @@ class GitHubReleaseUpdater(
         }
     }
 
-    /** Called only from the visible D-pad download control. */
-    fun downloadSelectedUpdate() {
+    /** Called only from the visible D-pad update control; it never silently installs. */
+    fun updateSelectedRelease() {
         val release = selectedRelease ?: run { publish("Спочатку перевірте оновлення.", false); return }
-        downloadedApk?.delete(); downloadedApk = null
-        publish("Завантажую оновлення…", true)
+        val cached = downloadedApk
+        if (cached != null) {
+            openVerifiedUpdate(cached, release.tag)
+            return
+        }
+        publish("Завантажую та перевіряю оновлення…", true)
         executor.execute {
             val result = runCatching { downloadAndVerify(release) }
             deliver {
                 result.fold(
-                    { apk -> downloadedApk = apk; publish("Оновлення завантажено. Виберіть «Встановити оновлення».", false); onReadyToInstall() },
+                    { apk ->
+                        downloadedApk = apk
+                        openVerifiedUpdate(apk, release.tag)
+                    },
                     { publish("Не вдалося завантажити або перевірити оновлення.", false) },
                 )
             }
         }
     }
 
-    /** Called only from the visible D-pad install control; never from a network callback. */
-    fun installDownloadedUpdate() {
-        val apk = downloadedApk ?: run { publish("Спочатку завантажте оновлення.", false); return }
-        if (!verifyArchive(apk, requireNotNull(selectedRelease).tag)) { publish("Завантажене оновлення не пройшло перевірку.", false); apk.delete(); downloadedApk = null; return }
-        if (!context.packageManager.canRequestPackageInstalls()) {
-            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            publish("Дозвольте встановлення з цього застосунку, потім виберіть «Встановити оновлення» ще раз.", false)
+    /** Rechecks the retained archive immediately before opening Android's system installer. */
+    private fun openVerifiedUpdate(apk: File, tag: String) {
+        if (!verifyArchive(apk, tag)) {
+            publish("Завантажене оновлення не пройшло перевірку.", false)
+            apk.delete(); downloadedApk = null
             return
         }
-        runCatching { openPackageInstaller(apk) }.onFailure { publish("Не вдалося відкрити системне підтвердження встановлення.", false) }
+        if (!context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            publish("Дозвольте встановлення з цього застосунку. Оновлення перевірено й збережено; після дозволу виберіть «Оновити» ще раз.", false)
+            return
+        }
+        when (runCatching { openPackageInstaller(apk) }.getOrDefault(false)) {
+            true -> publish("Відкрито системне підтвердження встановлення.", false)
+            false -> publish("Не знайдено єдиного системного встановлювача Android; оновлення не відкрито.", false)
+        }
     }
 
     private fun findNewestRelease(): Release? {
@@ -159,6 +179,7 @@ class GitHubReleaseUpdater(
     }
 
     private fun downloadAndVerify(release: Release): File {
+        checkOpen()
         val assetName = requireNotNull(ReleaseUpdatePolicy.expectedAssetName(release.tag))
         val expectedDigest = ReleaseUpdatePolicy.sha256FromSidecar(readText(release.checksumUrl, 4 * 1024, metadata = false), assetName)
             ?: error("Invalid checksum sidecar")
@@ -166,6 +187,7 @@ class GitHubReleaseUpdater(
         try {
             check(sha256(target) == expectedDigest) { "APK checksum mismatch" }
             check(verifyArchive(target, release.tag)) { "APK identity verification failed" }
+            checkOpen()
             return target
         } catch (failure: Throwable) { target.delete(); throw failure }
     }
@@ -217,53 +239,116 @@ class GitHubReleaseUpdater(
     }
 
     private fun downloadApk(url: String, assetName: String): File {
+        checkOpen()
         check(ReleaseUpdatePolicy.isExpectedDownloadUrl(url, selectedRelease?.tag, checksum = false))
         val updateDir = File(context.cacheDir, "updates").apply { mkdirs() }
         val target = File(updateDir, assetName); val partial = File(updateDir, "$assetName.part").apply { delete() }
-        withConnection(url, metadata = false) { connection ->
-            check(connection.responseCode in 200..299); check(connection.contentLengthLong in 1..MAX_APK_BYTES)
-            BufferedInputStream(connection.inputStream).use { input -> FileOutputStream(partial).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE); var total = 0L
-                while (true) { val count = input.read(buffer); if (count < 0) break; total += count; check(total <= MAX_APK_BYTES); output.write(buffer, 0, count) }
-            } }
+        try {
+            withConnection(url, metadata = false) { connection ->
+                check(connection.responseCode in 200..299); check(connection.contentLengthLong in 1..MAX_APK_BYTES)
+                BufferedInputStream(connection.inputStream).use { input -> FileOutputStream(partial).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE); var total = 0L
+                    while (true) { checkOpen(); val count = input.read(buffer); checkOpen(); if (count < 0) break; total += count; check(total <= MAX_APK_BYTES); output.write(buffer, 0, count) }
+                } }
+            }
+            checkOpen()
+            check(partial.length() > 3 && partial.inputStream().use { it.read() == 'P'.code && it.read() == 'K'.code }) { "Downloaded file is not an APK archive" }
+            synchronized(transferLock) { checkOpen(); check(partial.renameTo(target)) }
+            return target
+        } finally {
+            if (closed.get()) { partial.delete(); target.delete() }
         }
-        check(partial.length() > 3 && partial.inputStream().use { it.read() == 'P'.code && it.read() == 'K'.code }) { "Downloaded file is not an APK archive" }
-        check(partial.renameTo(target)); return target
     }
 
     private fun readLimited(connection: HttpURLConnection, limit: Int): String {
         check(connection.contentLengthLong <= limit || connection.contentLengthLong == -1L)
         connection.inputStream.use { input -> val bytes = ByteArrayOutputStream(); val buffer = ByteArray(DEFAULT_BUFFER_SIZE); var total = 0
-            while (true) { val count = input.read(buffer); if (count < 0) break; total += count; check(total <= limit); bytes.write(buffer, 0, count) }
+            while (true) { checkOpen(); val count = input.read(buffer); checkOpen(); if (count < 0) break; total += count; check(total <= limit); bytes.write(buffer, 0, count) }
             return bytes.toString(Charsets.UTF_8.name())
         }
     }
 
     private inline fun <T> withConnection(url: String, metadata: Boolean, block: (HttpURLConnection) -> T): T {
-        val connection = open(url, metadata); return try { block(connection) } finally { connection.disconnect() }
+        val connection = open(url, metadata)
+        synchronized(transferLock) {
+            checkOpen()
+            activeConnection = connection
+        }
+        return try { checkOpen(); block(connection) } finally {
+            synchronized(transferLock) { if (activeConnection === connection) activeConnection = null }
+            connection.disconnect()
+        }
     }
     private fun open(initialUrl: String, metadata: Boolean): HttpURLConnection {
         var url = initialUrl
         repeat(MAX_REDIRECTS + 1) {
             check(if (metadata) ReleaseUpdatePolicy.isTrustedMetadataUrl(url) else ReleaseUpdatePolicy.isTrustedRedirectUrl(url))
+            checkOpen()
             val connection = (URI(url).toURL().openConnection() as HttpURLConnection).apply { instanceFollowRedirects = false; connectTimeout = 15_000; readTimeout = 30_000; setRequestProperty("Accept", "application/vnd.github+json"); setRequestProperty("User-Agent", "android-tv-audio-reactive-updater") }
-            if (connection.responseCode !in 300..399) return connection
-            val location = connection.getHeaderField("Location") ?: error("Redirect without location"); connection.disconnect(); url = URI(url).resolve(location).toString()
+            synchronized(transferLock) { checkOpen(); activeConnection = connection }
+            try {
+                if (connection.responseCode !in 300..399) return connection
+                val location = connection.getHeaderField("Location") ?: error("Redirect without location")
+                synchronized(transferLock) { if (activeConnection === connection) activeConnection = null }
+                connection.disconnect(); url = URI(url).resolve(location).toString()
+            } catch (failure: Throwable) {
+                synchronized(transferLock) { if (activeConnection === connection) activeConnection = null }
+                connection.disconnect()
+                throw failure
+            }
         }
         error("Too many redirects")
     }
     private fun sha256(file: File): String = file.inputStream().use { input ->
         val digest = MessageDigest.getInstance("SHA-256"); val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
+        while (true) { checkOpen(); val count = input.read(buffer); checkOpen(); if (count < 0) break; digest.update(buffer, 0, count) }
         digest.digest().joinToString("") { "%02x".format(it) }
     }
-    private fun openPackageInstaller(apk: File) {
+    private fun archiveInstallIntent(uri: Uri): Intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive")
+
+    private fun installerCandidates(intent: Intent): List<ReleaseUpdatePolicy.InstallerCandidate> =
+        context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).mapNotNull { resolved ->
+            val activity = resolved.activityInfo ?: return@mapNotNull null
+            val systemFlags = activity.applicationInfo.flags
+            ReleaseUpdatePolicy.InstallerCandidate(
+                activity.packageName,
+                activity.name,
+                systemFlags and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
+            )
+        }
+
+    /** A URI grant is attached only after an unambiguous system activity is selected and revalidated. */
+    private fun openPackageInstaller(apk: File): Boolean {
+        checkOpen()
         val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", apk)
-        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        val implicit = archiveInstallIntent(uri)
+        val selected = ReleaseUpdatePolicy.selectSystemInstaller(installerCandidates(implicit)) ?: return false
+        val component = ComponentName(selected.packageName, selected.className)
+        // Query the implicit intent again immediately before launch: no resolver choice or stale target is trusted.
+        if (ReleaseUpdatePolicy.selectSystemInstaller(installerCandidates(implicit)) != selected) return false
+        val explicit = Intent(implicit).setComponent(component)
+        val resolved = context.packageManager.resolveActivity(explicit, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo
+            ?: return false
+        val flags = resolved.applicationInfo.flags
+        if (resolved.packageName != selected.packageName || resolved.name != selected.className ||
+            flags and (android.content.pm.ApplicationInfo.FLAG_SYSTEM or android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0
+        ) return false
+        checkOpen()
+        context.startActivity(Intent(implicit).setComponent(component).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        return true
     }
     private fun publish(message: String, busy: Boolean) = deliver { onStatus(message, busy) }
+    private fun checkOpen() { check(!closed.get()) { "Updater is closed" } }
     private fun deliver(block: () -> Unit) { if (!closed.get()) context.mainExecutor.execute { if (!closed.get()) block() } }
-    override fun close() { closed.set(true); selectedRelease = null; downloadedApk?.delete(); downloadedApk = null; executor.shutdownNow() }
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        selectedRelease = null
+        synchronized(transferLock) { activeConnection?.disconnect(); activeConnection = null }
+        downloadedApk?.delete(); downloadedApk = null
+        File(context.cacheDir, "updates").listFiles()?.forEach(File::delete)
+        executor.shutdownNow()
+    }
     private companion object {
         const val MAX_REDIRECTS = 5
         const val MAX_RELEASE_PAGES = 10

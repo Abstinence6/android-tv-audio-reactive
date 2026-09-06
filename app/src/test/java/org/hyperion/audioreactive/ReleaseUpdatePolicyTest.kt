@@ -69,4 +69,29 @@ class ReleaseUpdatePolicyTest {
         assertFalse(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf(pin, "b".repeat(64)), pin))
         assertFalse(ReleaseUpdatePolicy.hasPinnedReleaseCertificate(listOf(pin), "not-a-fingerprint"))
     }
+
+    @Test fun installerSelectionFailsClosedWithoutASystemHandler() {
+        assertNull(ReleaseUpdatePolicy.selectSystemInstaller(emptyList()))
+        assertNull(ReleaseUpdatePolicy.selectSystemInstaller(listOf(installer("third.party", false))))
+    }
+
+    @Test fun installerSelectionIgnoresThirdPartyHandlerWhenOneSystemHandlerExists() {
+        assertEquals(installer("android.installer", true), ReleaseUpdatePolicy.selectSystemInstaller(listOf(
+            installer("third.party", false), installer("android.installer", true),
+        )))
+    }
+
+    @Test fun installerSelectionFailsClosedForMultipleSystemHandlers() {
+        assertNull(ReleaseUpdatePolicy.selectSystemInstaller(listOf(
+            installer("android.installer.one", true), installer("android.installer.two", true),
+        )))
+    }
+
+    @Test fun installerSelectionReturnsTheExactSystemComponentForExplicitLaunch() {
+        val selected = installer("android.installer", true, "InstallActivity")
+        assertEquals(selected, ReleaseUpdatePolicy.selectSystemInstaller(listOf(selected)))
+    }
+
+    private fun installer(packageName: String, system: Boolean, className: String = "InstallerActivity") =
+        ReleaseUpdatePolicy.InstallerCandidate(packageName, className, system)
 }

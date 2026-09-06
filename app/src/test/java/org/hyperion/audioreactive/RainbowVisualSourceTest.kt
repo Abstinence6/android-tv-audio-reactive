@@ -31,4 +31,19 @@ class RainbowVisualSourceTest {
         assertFalse(source.contains("RainbowVisualActivity"))
         assertFalse(source.contains("startActivity(Intent(this, RainbowVisualActivity::class.java))"))
     }
+
+    @Test fun mainActivityDestroyRemovesBothVisualAnimationCallbacks() {
+        val source = sequenceOf(
+            File("src/main/java/org/hyperion/audioreactive/MainActivity.kt"),
+            File("app/src/main/java/org/hyperion/audioreactive/MainActivity.kt"),
+        ).first(File::isFile).readText()
+        val onDestroyStart = source.indexOf("override fun onDestroy() {")
+        val onDestroyEnd = source.indexOf("\n    private fun handleCaptureToggle()", onDestroyStart)
+        assertTrue(onDestroyStart >= 0)
+        assertTrue(onDestroyEnd > onDestroyStart)
+        val onDestroy = source.substring(onDestroyStart, onDestroyEnd)
+
+        assertTrue(onDestroy.contains("rainbowHandler.removeCallbacks(rainbowAnimator)"))
+        assertTrue(onDestroy.contains("rainbowHandler.removeCallbacks(movingBarsAnimator)"))
+    }
 }
