@@ -33,7 +33,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
             val gain = if (hasAudioAccent) videoAudioGain(features, settings.videoAudioEffect, zone) else 0f
-            var brightness = settings.brightness * (1f + settings.audioBoost * gain)
+            val brightness = VideoAudioSilenceBrightnessPolicy.composeBrightness(settings, features?.signalPresent) * (1f + settings.audioBoost * gain)
             if (settings.renderMode != RenderMode.AUDIO) {
                 val saturation = settings.videoSaturationPercent.coerceIn(VideoSaturationPolicy.MIN_PERCENT, VideoSaturationPolicy.MAX_PERCENT) / 100f
                 val average = (r + g + b) / 3f
@@ -77,18 +77,6 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     companion object { const val BLACK_FRAME_HOLD = 30 }
 }
 
-/** Retains the last complete video output so realtime routes stay leased between producer frames. */
-internal class VideoRealtimeFrameCache {
-    private var frame = ByteArray(0)
-
-    fun update(source: ByteArray): ByteArray {
-        if (frame.size != source.size) frame = ByteArray(source.size)
-        source.copyInto(frame)
-        return frame
-    }
-
-    fun current(): ByteArray? = frame.takeIf { it.isNotEmpty() }
-}
 
 object VideoSaturationPolicy {
     const val MIN_PERCENT = 0

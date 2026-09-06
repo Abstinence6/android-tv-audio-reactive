@@ -111,14 +111,23 @@ class MqttControlService : Service(), MqttCallbackExtended {
     override fun messageArrived(topic: String?, message: MqttMessage?) {
         val command = MqttContract.parseCommand(topic.orEmpty(), message?.payload?.decodeToString().orEmpty(), message?.isRetained == true)
         val action = MqttCommandPolicy.decide(command, AudioReactiveService.exists())
+        var detail: String? = null
         when (action) {
             MqttCommandPolicy.Action.ReportConsentRequired -> publishSnapshot("needs_media_projection_consent")
             MqttCommandPolicy.Action.StopOwnedCapture -> AudioReactiveService.stopExisting(this)
-            is MqttCommandPolicy.Action.ChangeEffect -> RuntimeSettings.update { it.copy(effect = action.effect) }
-            is MqttCommandPolicy.Action.ChangeSetting -> MqttSettingsPolicy.apply(RuntimeSettings.snapshot(), action.update)?.let(RuntimeSettings::apply)
+            is MqttCommandPolicy.Action.ChangeEffect -> {
+                val persisted = RuntimeSettings.snapshot()
+                if (AudioReactiveService.exists()) LiveRendererSettings.setActiveEffect(action.effect)
+                else EffectSelectorPolicy.withActiveName(persisted, action.effect)?.let(RuntimeSettings::apply)
+            }
+            is MqttCommandPolicy.Action.ChangeSetting -> {
+                if (AudioReactiveService.exists()) {
+                    if (!LiveMqttSettingsPolicy.apply(RuntimeSettings.snapshot(), action.update)) detail = if (action.update.field == "render_mode") LiveMqttSettingsPolicy.BLOCKED_DETAIL else "setting blocked while capture is active"
+                } else MqttSettingsPolicy.apply(RuntimeSettings.snapshot(), action.update)?.let(RuntimeSettings::apply)
+            }
             MqttCommandPolicy.Action.Ignore -> Unit
         }
-        if (command != null && action !is MqttCommandPolicy.Action.ReportConsentRequired) publishSnapshot()
+        if (command != null && action !is MqttCommandPolicy.Action.ReportConsentRequired) publishSnapshot(detail ?: if (AudioReactiveService.exists()) "capture_active" else "needs_media_projection_consent")
     }
 
     private fun publishSnapshot(detail: String = if (AudioReactiveService.exists()) "capture_active" else "needs_media_projection_consent") {
@@ -130,7 +139,8 @@ class MqttControlService : Service(), MqttCallbackExtended {
             appVersion = BuildConfig.VERSION_NAME,
             deviceName = listOf(Build.MANUFACTURER, Build.MODEL).filter(String::isNotBlank).joinToString(" ").ifBlank { "unknown" },
         )
-        MqttContract.snapshot(RuntimeSettings.snapshot(), runtime).forEach { p ->
+        val effective = EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), runtime.captureActive)
+        MqttContract.snapshot(effective, runtime).forEach { p ->
             runCatching { c.publish(p.topic, p.payload.toByteArray(), 1, p.retained) }
         }
     }

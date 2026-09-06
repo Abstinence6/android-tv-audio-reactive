@@ -173,13 +173,13 @@ internal class OutputRouter private constructor(private val mode: OutputMode, pr
         fun create(settings: AudioSettings, wledBindingId: String? = null, hyperionBindingId: String? = null): OutputRouter = when (settings.outputMode) {
             OutputMode.HYPERION -> {
                 val fresh = HyperionRouteBindings.consume(hyperionBindingId, settings) ?: throw IllegalStateException("Missing fresh Hyperion route binding")
-                OutputRouter(OutputMode.HYPERION, HyperionRouteOutput(fresh, settings.sourceFrame()), emptyArray())
+                OutputRouter(OutputMode.HYPERION, HyperionRouteOutput(fresh, settings.liveCaptureFrame()), emptyArray())
             }
             OutputMode.WLED -> {
                 val fresh = WledRouteBindings.consume(wledBindingId, settings)
                     ?.takeIf { it.isNotEmpty() && it.all(WledDevice::valid) }
                     ?: throw IllegalStateException("Missing fresh WLED route binding")
-                val input = settings.captureFrame()
+                val input = settings.liveCaptureFrame()
                 OutputRouter(OutputMode.WLED, null, fresh.map { device -> WledRealtimeOutput(device, settings.wledSourceZones, if (settings.requiresVideo()) settings.calibrationFor(device) else null, input) }.toTypedArray(), WledSourceFrame(input, settings.wledSourceZones))
             }
         }

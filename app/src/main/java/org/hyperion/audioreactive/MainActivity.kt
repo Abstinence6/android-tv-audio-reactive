@@ -287,7 +287,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     if (suppressEffectSelection) return
-                    val s = RuntimeSettings.snapshot()
+                    val s = effectiveRenderSettings()
                     when (s.renderMode) {
                         RenderMode.AUDIO -> Effect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setEffect(value) else RuntimeSettings.update { it.copy(effect = value) } }
                         RenderMode.VIDEO -> VideoEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoEffect(value) else RuntimeSettings.update { it.copy(videoEffect = value) } }
@@ -302,7 +302,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     /** Rebuild before selecting, so an old catalogue ordinal can never mutate a new mode. */
     private fun rebuildEffectSelector() {
-        val settings = RuntimeSettings.snapshot()
+        val settings = effectiveRenderSettings()
         suppressEffectSelection = true
         try {
             effectSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, EffectSelectorPolicy.labels(settings))
@@ -340,6 +340,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }.also(panel::addView)
         sliderRow("Яскравість", (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, { SliderFormatters.brightness(it * .05f) }) {
             updateBrightness(it * .05f)
+        }.also(panel::addView)
+        sliderRow("Мінімальна яскравість без звуку", (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, { SliderFormatters.brightness(it * .05f) }) {
+            updateVideoAudioSilenceBrightnessFloor(it * .05f)
         }.also(panel::addView)
         panel.addView(TextView(this).apply { text = "Параметри ефекту" })
         videoColourTreatmentRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
@@ -399,12 +402,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     private fun updateBrightness(value: Float) {
         if (AudioReactiveService.exists()) LiveRendererSettings.setBrightness(value)
-        else RuntimeSettings.update { it.copy(brightness = value) }
+        else RuntimeSettings.update { it.copy(brightness = value, videoAudioSilenceBrightnessFloor = it.videoAudioSilenceBrightnessFloor.coerceAtMost(value)) }
     }
 
     private fun updateSensitivity(value: Float) {
         if (AudioReactiveService.exists()) LiveRendererSettings.setSensitivity(value)
         else RuntimeSettings.update { it.copy(sensitivity = value) }
+    }
+
+    private fun updateVideoAudioSilenceBrightnessFloor(value: Float) {
+        if (AudioReactiveService.exists()) {
+            val live = LiveRendererSettings.apply(RuntimeSettings.snapshot())
+            LiveRendererSettings.setVideoAudioSilenceBrightnessFloor(value.coerceIn(0f, live.brightness), live.brightness)
+        } else RuntimeSettings.update { it.copy(videoAudioSilenceBrightnessFloor = value.coerceIn(0f, it.brightness)) }
     }
 
 
@@ -431,16 +441,26 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
 
     private fun resolveCaptureMode() {
-        if (suppressModeCallbacks || AudioReactiveService.exists()) return
-        val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, RuntimeSettings.snapshot().renderMode)
+        if (suppressModeCallbacks) return
+        val persisted = RuntimeSettings.snapshot()
+        val previous = effectiveRenderSettings().renderMode
+        val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, previous)
+        val accepted = !AudioReactiveService.exists() || LiveRendererSettings.setRenderMode(result.mode)
+        val visible = LiveRenderModeUiPolicy.checkboxes(
+            if (accepted) {
+                if (AudioReactiveService.exists()) effectiveRenderSettings().renderMode else result.mode
+            } else previous
+        )
         suppressModeCallbacks = true
-        audioBox.isChecked = result.audioChecked
-        videoBox.isChecked = result.videoChecked
+        audioBox.isChecked = visible.audioChecked
+        videoBox.isChecked = visible.videoChecked
         suppressModeCallbacks = false
-        RuntimeSettings.update { it.copy(renderMode = result.mode) }
-        if (result.rejected) status.text = "Потрібен щонайменше один режим."
+        if (!AudioReactiveService.exists()) RuntimeSettings.update { it.copy(renderMode = result.mode) }
+        if (!accepted) status.text = "Перехід до відео відхилено: WLED потребує зупинки, перевірки та перезапуску."
+        else if (result.rejected) status.text = "Потрібен щонайменше один режим."
         rebuildEffectSelector()
         refreshConditionalControls()
+        MqttControlService.notifyDiagnosticChanged()
     }
 
     private fun selectOutput(clicked: OutputMode, checked: Boolean) {
@@ -590,7 +610,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
 
     private fun refreshConditionalControls() {
-        val settings = RuntimeSettings.snapshot()
+        val settings = effectiveRenderSettings()
         val video = TvUiStatePolicy.showVideoControls(settings.renderMode)
         qualityRow.visibility = if (video) View.VISIBLE else View.GONE
         videoColourTreatmentRow.visibility = if (TvUiStatePolicy.showVideoColourTreatment(settings.renderMode)) View.VISIBLE else View.GONE
@@ -604,6 +624,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         videoFpsRow.visibility = View.VISIBLE
         zonesRow.visibility = if (TvUiStatePolicy.showWledZones(settings.outputMode)) View.VISIBLE else View.GONE
     }
+
+    private fun effectiveRenderSettings(): AudioSettings =
+        EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), AudioReactiveService.exists())
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -636,7 +659,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         // The local visual source is safe while capture owns a route.
         testButton.isEnabled = !captureAdmissionLocked
         modeMutableRows.forEach { control ->
-            if (control is LinearLayout) setChildrenEnabled(control, !locked) else control.isEnabled = !locked
+            // Capture inputs are renderer-local and intentionally remain live; all admission/route settings stay locked.
+            val enabled = if (control === audioBox || control === videoBox) !captureAdmissionLocked else !locked
+            if (control is LinearLayout) setChildrenEnabled(control, enabled) else control.isEnabled = enabled
         }
         discoverButton.isEnabled = !locked
         setChildrenEnabled(zonesRow, !locked)

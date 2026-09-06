@@ -2,12 +2,53 @@ package org.hyperion.audioreactive
 
 /** A brightness blackout and audio silence both bypass output smoothing. */
 object FrameSmoothingPolicy {
-    fun immediateBlack(brightness: Float, signalPresent: Boolean?): Boolean =
-        brightness == 0f || signalPresent == false
+    fun immediateBlack(settings: AudioSettings, signalPresent: Boolean?): Boolean =
+        settings.brightness == 0f || (signalPresent == false && !VideoAudioSilenceBrightnessPolicy.retainsVideo(settings))
+    /** Legacy callers are audio-only and retain their historical silence blackout. */
+    fun immediateBlack(brightness: Float, signalPresent: Boolean?): Boolean = brightness == 0f || signalPresent == false
+}
+
+/** A positive VIDEO_AUDIO floor changes only silence behavior; protected/black source handling remains terminal. */
+object VideoAudioSilenceBrightnessPolicy {
+    fun retainsVideo(settings: AudioSettings) = settings.renderMode == RenderMode.VIDEO_AUDIO && settings.videoAudioSilenceBrightnessFloor > 0f
+    fun composeBrightness(settings: AudioSettings, signalPresent: Boolean?) =
+        if (settings.renderMode == RenderMode.VIDEO_AUDIO && signalPresent == false) maxOf(settings.videoAudioSilenceBrightnessFloor, settings.brightness) else settings.brightness
+}
+
+/** `acquireLatestImage` plus a two-image reader bounds capture backlog to one obsolete image. */
+object VideoLatencyPolicy {
+    const val IMAGE_READER_MAX_IMAGES = 2
+    enum class Tick { SEND_FRESH, HOLD }
+    /** A held tick deliberately does not resend the prior RGB frame. */
+    fun dispatch(hasFreshImage: Boolean): Tick = if (hasFreshImage) Tick.SEND_FRESH else Tick.HOLD
+}
+
+/**
+ * Production capture hand-off: acquire at most one latest frame, render and send it once, then
+ * always release it. This is platform-neutral so JVM tests can exercise the same ownership and
+ * failure path used with ImageReader, while ImageReader remains the Android boundary.
+ */
+internal object FreshFrameDispatcher {
+    enum class Result { NO_FRESH_FRAME, SENT, RENDER_REJECTED }
+
+    fun <Frame> dispatch(
+        acquireLatest: () -> Frame?,
+        release: (Frame) -> Unit,
+        render: (Frame) -> ByteArray?,
+        send: (ByteArray) -> Unit,
+    ): Result {
+        val frame = acquireLatest() ?: return Result.NO_FRESH_FRAME
+        try {
+            val rendered = render(frame) ?: return Result.RENDER_REJECTED
+            send(rendered)
+            return Result.SENT
+        } finally {
+            release(frame)
+        }
+    }
 }
 
 /** A discovery result may only mutate persisted inventory while its admission epoch remains idle. */
 object DiscoveryCompletionPolicy {
-    fun mayMerge(queuedGeneration: Long, currentGeneration: Long, captureOrAdmissionActive: Boolean): Boolean =
-        queuedGeneration == currentGeneration && !captureOrAdmissionActive
+    fun mayMerge(queuedGeneration: Long, currentGeneration: Long, captureOrAdmissionActive: Boolean): Boolean = queuedGeneration == currentGeneration && !captureOrAdmissionActive
 }

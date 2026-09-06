@@ -64,15 +64,42 @@ class VideoModePolicyTest {
         assertTrue(output.all { it == 0.toByte() })
     }
 
-    @Test fun realtimeVideoCacheRetainsTheLastCompleteFrameWhenNoNewImageArrives() {
-        val cache = VideoRealtimeFrameCache()
-        val first = byteArrayOf(1, 2, 3)
-        assertNull(cache.current())
-        val retained = cache.update(first)
-        first.fill(9)
-        assertArrayEquals(byteArrayOf(1, 2, 3), cache.current())
-        assertSame(retained, cache.update(byteArrayOf(4, 5, 6)))
-        assertArrayEquals(byteArrayOf(4, 5, 6), cache.current())
+    @Test fun videoAudioSilenceFloorPreservesNonBlackVideoButZeroKeepsHistoricalBlackout() {
+        val processor = processorWith(80, 40, 20)
+        val silent = AudioFeatures(0f, 0f, 0f, 0f, 0f, 0f, FloatArray(AudioFeatures.BAND_COUNT), false)
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = .7f)
+        val raw = processor.compose(silent, base.copy(videoAudioSilenceBrightnessFloor = .2f)).copyOf()
+        assertTrue(raw.any { it != 0.toByte() })
+        assertFalse(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = .2f), false))
+        assertTrue(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = 0f), false))
+        assertFalse(AudioSettings.defaults().copy(brightness = .4f, videoAudioSilenceBrightnessFloor = .45f).valid())
+    }
+
+    @Test fun liveInputTransitionsPreserveOneValidInputAndNeverRequireASettingsRestart() {
+        val audio = CaptureModeCheckboxPolicy.resolve(true, false, RenderMode.VIDEO_AUDIO)
+        val video = CaptureModeCheckboxPolicy.resolve(false, true, audio.mode)
+        val both = CaptureModeCheckboxPolicy.resolve(true, true, video.mode)
+        val rejected = CaptureModeCheckboxPolicy.resolve(false, false, both.mode)
+        assertEquals(RenderMode.AUDIO, audio.mode); assertEquals(RenderMode.VIDEO, video.mode); assertEquals(RenderMode.VIDEO_AUDIO, both.mode)
+        assertTrue(rejected.rejected); assertTrue(rejected.audioChecked); assertTrue(rejected.videoChecked)
+        LiveRendererSettings.begin(AudioSettings.defaults())
+        try { LiveRendererSettings.setRenderMode(RenderMode.VIDEO); assertEquals(RenderMode.VIDEO, LiveRendererSettings.apply(AudioSettings.defaults()).renderMode) } finally { LiveRendererSettings.end() }
+    }
+
+    @Test fun liveCaptureFrameIsStableAcrossInputTransitionsAndLatencyPolicySendsOnlyFreshImages() {
+        val base = AudioSettings.defaults().copy(videoQuality = VideoQuality.HIGH)
+        assertEquals(base.copy(renderMode = RenderMode.AUDIO).liveCaptureFrame(), base.copy(renderMode = RenderMode.VIDEO_AUDIO).liveCaptureFrame())
+        assertEquals(2, VideoLatencyPolicy.IMAGE_READER_MAX_IMAGES)
+        assertEquals(VideoLatencyPolicy.Tick.SEND_FRESH, VideoLatencyPolicy.dispatch(true))
+        assertEquals(VideoLatencyPolicy.Tick.HOLD, VideoLatencyPolicy.dispatch(false))
+    }
+
+    @Test fun heldLatencyTicksDoNotResendAStaleFrame() {
+        val sends = mutableListOf<Int>()
+        listOf(true, false, false, true).forEachIndexed { frame, fresh ->
+            if (VideoLatencyPolicy.dispatch(fresh) == VideoLatencyPolicy.Tick.SEND_FRESH) sends += frame
+        }
+        assertEquals(listOf(0, 3), sends)
     }
 
     @Test fun videoAudioAppliesVideoSaturationAndOnlyAddsBrightnessModulation() {
@@ -93,7 +120,7 @@ class VideoModePolicyTest {
     @Test fun liveVideoTreatmentAndSaturationChangeVideoAndVideoAudioWithoutPersisting() {
         val processor = processorWith(40, 80, 120)
         val persisted = AudioSettings.defaults().copy(brightness = 1f, videoEffect = VideoEffect.NORMAL, videoSaturationPercent = 125)
-        LiveRendererSettings.begin()
+        LiveRendererSettings.begin(persisted)
         try {
             LiveRendererSettings.setVideoEffect(VideoEffect.SATURATION)
             LiveRendererSettings.setVideoSaturationPercent(0)
@@ -104,6 +131,45 @@ class VideoModePolicyTest {
             assertEquals(0, live.videoSaturationPercent)
             assertArrayEquals(byteArrayOf(80, 80, 80), processor.compose(null, live.copy(renderMode = RenderMode.VIDEO)).copyOf())
             assertArrayEquals(byteArrayOf(80, 80, 80), processor.compose(null, live.copy(renderMode = RenderMode.VIDEO_AUDIO)).copyOf())
+        } finally { LiveRendererSettings.end() }
+    }
+
+    @Test fun audioAdmittedWledWithoutCalibrationCannotTransitionToVideoAndStateIsUnchanged() {
+        val device = WledDevice("mac:AABBCCDDEEFF", "TV", "192.168.1.2", 16, 21324)
+        val admitted = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(device), selectedWledIdentities = setOf(device.identity), renderMode = RenderMode.AUDIO)
+        LiveRendererSettings.begin(admitted)
+        try {
+            assertFalse(LiveRendererSettings.setRenderMode(RenderMode.VIDEO))
+            assertFalse(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
+            assertEquals(RenderMode.AUDIO, LiveRendererSettings.apply(admitted).renderMode)
+        } finally { LiveRendererSettings.end() }
+    }
+
+    @Test fun hyperionAndPreflightedVideoWledCanTransitionLiveWithoutChangingRouteSettings() {
+        val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "Hyperion", "192.168.1.2")
+        val hyperionAdmitted = AudioSettings.defaults().copy(hyperionDevices = listOf(hyperion), selectedHyperionIdentity = hyperion.identity, renderMode = RenderMode.AUDIO)
+        val wled = WledDevice("mac:AABBCCDDEEFF", "TV", "192.168.1.3", 16, 21324)
+        val videoWled = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity), wledCalibrations = listOf(WledScreenCalibration.proportional(wled.identity, wled.leds)), renderMode = RenderMode.VIDEO)
+        listOf(hyperionAdmitted, videoWled).forEach { admitted ->
+            LiveRendererSettings.begin(admitted)
+            try {
+                assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
+                assertEquals(admitted.outputMode, LiveRendererSettings.apply(admitted).outputMode)
+                assertEquals(RenderMode.VIDEO_AUDIO, LiveRendererSettings.apply(admitted).renderMode)
+            } finally { LiveRendererSettings.end() }
+        }
+    }
+
+    @Test fun activeSilenceFloorIsObservedAndBrightnessReductionKeepsItValid() {
+        val persisted = AudioSettings.defaults().copy(brightness = .7f, renderMode = RenderMode.VIDEO_AUDIO)
+        LiveRendererSettings.begin(persisted)
+        try {
+            LiveRendererSettings.setVideoAudioSilenceBrightnessFloor(.4f, .7f)
+            assertFalse(FrameSmoothingPolicy.immediateBlack(LiveRendererSettings.apply(persisted), false))
+            LiveRendererSettings.setBrightness(.2f)
+            val live = LiveRendererSettings.apply(persisted)
+            assertEquals(.2f, live.videoAudioSilenceBrightnessFloor)
+            assertTrue(live.valid())
         } finally { LiveRendererSettings.end() }
     }
 

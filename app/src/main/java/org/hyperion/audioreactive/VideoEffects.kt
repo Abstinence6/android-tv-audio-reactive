@@ -38,6 +38,31 @@ object EffectSelectorPolicy {
     }
 
     fun labels(settings: AudioSettings): List<String> = VideoEffectCatalog.labels(settings.renderMode)
+
+    fun names(settings: AudioSettings): List<String> = when (settings.renderMode) {
+        RenderMode.AUDIO -> Effect.entries.map { it.name }
+        RenderMode.VIDEO -> VideoEffect.entries.map { it.name }
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.map { it.name }
+    }
+
+    fun activeName(settings: AudioSettings): String = when (settings.renderMode) {
+        RenderMode.AUDIO -> settings.effect.name
+        RenderMode.VIDEO -> settings.videoEffect.name
+        RenderMode.VIDEO_AUDIO -> settings.videoAudioEffect.name
+    }
+
+    /** A mode-local command cannot accidentally write an effect from a different catalogue. */
+    fun withActiveName(settings: AudioSettings, name: String): AudioSettings? = when (settings.renderMode) {
+        RenderMode.AUDIO -> Effect.entries.firstOrNull { it.name == name }?.let { settings.copy(effect = it) }
+        RenderMode.VIDEO -> VideoEffect.entries.firstOrNull { it.name == name }?.let { settings.copy(videoEffect = it) }
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.firstOrNull { it.name == name }?.let { settings.copy(videoAudioEffect = it) }
+    }
+}
+
+/** The renderer-local override is the sole effective settings source while capture owns its bindings. */
+object EffectiveRenderSettings {
+    fun snapshot(persisted: AudioSettings, captureActive: Boolean): AudioSettings =
+        if (captureActive) LiveRendererSettings.apply(persisted) else persisted
 }
 
 /** Runtime-only renderer overrides. During capture no route/capture setting is persisted or changed. */
@@ -50,36 +75,75 @@ object LiveRendererSettings {
     private var brightness: Float? = null
     private var sensitivity: Float? = null
     private var videoSaturationPercent: Int? = null
+    private var renderMode: RenderMode? = null
+    private var videoAudioSilenceBrightnessFloor: Float? = null
+    private var admitted: AudioSettings? = null
 
 
-    @Synchronized fun begin() { active = true; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null }
-    @Synchronized fun end() { active = false; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null }
+    @Synchronized fun begin(settings: AudioSettings) { active = true; admitted = settings; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null }
+    @Synchronized fun end() { active = false; admitted = null; effect = null; videoEffect = null; videoAudioEffect = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null }
     @Synchronized fun setEffect(value: Effect) { if (active) effect = value }
     @Synchronized fun setVideoEffect(value: VideoEffect) { if (active) videoEffect = value }
     @Synchronized fun setVideoAudioEffect(value: VideoAudioEffect) { if (active) videoAudioEffect = value }
+    @Synchronized fun setActiveEffect(name: String): Boolean {
+        val current = currentRenderMode(admitted ?: return false)
+        return when (current) {
+            RenderMode.AUDIO -> Effect.entries.firstOrNull { it.name == name }?.let { effect = it } != null
+            RenderMode.VIDEO -> VideoEffect.entries.firstOrNull { it.name == name }?.let { videoEffect = it } != null
+            RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.firstOrNull { it.name == name }?.let { videoAudioEffect = it } != null
+        }
+    }
 
     @Synchronized fun setParameters(value: EffectParameters) { if (active && value.valid()) parameters = value }
     /** These are renderer-local scalars; neither alters an admitted route or capture buffers. */
-    @Synchronized fun setBrightness(value: Float) { if (active && value in 0f..1f) brightness = value }
+    @Synchronized fun setBrightness(value: Float) { if (active && value in 0f..1f) { brightness = value; videoAudioSilenceBrightnessFloor = videoAudioSilenceBrightnessFloor?.coerceAtMost(value) } }
     @Synchronized fun setSensitivity(value: Float) { if (active && value in .25f..3.25f) sensitivity = value }
     @Synchronized fun setVideoSaturationPercent(value: Int) { if (active && VideoSaturationPolicy.valid(value)) videoSaturationPercent = value }
+    /** Never changes a router or capture resource: only an already video-capable admitted route can render video live. */
+    @Synchronized fun setRenderMode(value: RenderMode): Boolean {
+        if (!active || !LiveRenderModeTransitionPolicy.permits(admitted, value)) return false
+        renderMode = value
+        return true
+    }
+    @Synchronized fun currentRenderMode(fallback: AudioSettings): RenderMode = renderMode ?: admitted?.renderMode ?: fallback.renderMode
+    @Synchronized fun setVideoAudioSilenceBrightnessFloor(value: Float, ceiling: Float) { if (active && value in 0f..ceiling) videoAudioSilenceBrightnessFloor = value }
     /** Consecutive live edits use the last live value, not a stale persisted snapshot. */
     @Synchronized fun updateParameters(persisted: EffectParameters, transform: (EffectParameters) -> EffectParameters) {
         transform(parameters ?: persisted).takeIf(EffectParameters::valid)?.let { parameters = it }
     }
-    @Synchronized fun apply(settings: AudioSettings): AudioSettings = settings.copy(
+    @Synchronized fun apply(settings: AudioSettings): AudioSettings {
+        val resolvedBrightness = brightness ?: settings.brightness
+        return settings.copy(
         effect = effect ?: settings.effect,
         videoEffect = videoEffect ?: settings.videoEffect,
         videoAudioEffect = videoAudioEffect ?: settings.videoAudioEffect,
         effectParameters = parameters ?: settings.effectParameters,
-        brightness = brightness ?: settings.brightness,
+        brightness = resolvedBrightness,
         sensitivity = sensitivity ?: settings.sensitivity,
         videoSaturationPercent = videoSaturationPercent ?: settings.videoSaturationPercent,
+        renderMode = renderMode ?: admitted?.renderMode ?: settings.renderMode,
+        videoAudioSilenceBrightnessFloor = (videoAudioSilenceBrightnessFloor ?: settings.videoAudioSilenceBrightnessFloor).coerceIn(0f, resolvedBrightness),
+    )
+    }
+}
+
+/** WLED mappers are fixed at preflight. AUDIO admission has no mapper and must stop/restart before video. */
+object LiveRenderModeTransitionPolicy {
+    fun permits(admitted: AudioSettings?, requested: RenderMode): Boolean = admitted != null &&
+        (requested == RenderMode.AUDIO || admitted.outputMode == OutputMode.HYPERION ||
+            (admitted.requiresVideo() && admitted.selectedWledDevices().all { WledCalibrationPolicy.routeable(admitted, it) }))
+}
+
+object LiveRenderModeUiPolicy {
+    fun checkboxes(mode: RenderMode) = CaptureModeCheckboxPolicy.resolve(
+        audio = mode != RenderMode.VIDEO,
+        video = mode != RenderMode.AUDIO,
+        previous = mode,
     )
 }
 
 /** Only these controls are read atomically by the active renderer. Route/capture controls remain locked. */
 object LiveRendererControlPolicy {
-    val sliderLabels = setOf("Чутливість", "Яскравість", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри")
+    val sliderLabels = setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри")
     fun sliderMutable(label: String) = label in sliderLabels
 }

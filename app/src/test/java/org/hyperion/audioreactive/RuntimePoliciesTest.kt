@@ -20,6 +20,7 @@ class RuntimePoliciesTest {
     @Test fun brightnessAndSilenceBothRequestImmediateBlack() {
         assertTrue(FrameSmoothingPolicy.immediateBlack(0f, true))
         assertTrue(FrameSmoothingPolicy.immediateBlack(.6f, false))
+        assertFalse(FrameSmoothingPolicy.immediateBlack(AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, videoAudioSilenceBrightnessFloor = .1f), false))
         assertFalse(FrameSmoothingPolicy.immediateBlack(.6f, null))
     }
 }

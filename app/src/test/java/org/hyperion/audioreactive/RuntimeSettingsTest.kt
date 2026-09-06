@@ -62,6 +62,16 @@ class RuntimeSettingsTest {
         assertTrue(!zero.copy(brightness = -.01f).valid())
     }
 
+    @Test fun videoAudioSilenceFloorPersistsAndCannotExceedBrightness() {
+        val store = MemoryStore(null)
+        val saved = AudioSettings.defaults().copy(brightness = .7f, videoAudioSilenceBrightnessFloor = .2f, renderMode = RenderMode.VIDEO_AUDIO)
+        RuntimeSettings.initialize(store)
+        RuntimeSettings.apply(saved)
+        RuntimeSettings.initialize(store)
+        assertEquals(.2f, RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor)
+        assertTrue(!saved.copy(videoAudioSilenceBrightnessFloor = .8f).valid())
+    }
+
     @Test fun everyVideoQualityMapsToASupportedCaptureFrame() {
         val expected = listOf(
             VideoQuality.VERY_LOW to SourceFrameSpec(64, 36, 20),

@@ -75,8 +75,8 @@ class MqttContractTest {
 
     @Test fun effectCommandsRemainAllowlistedAndCanSafelyChangeRendererDuringCapture() {
         val spectrum = MqttContract.parseCommand(MqttContract.EFFECT_COMMAND, "SPECTRUM", false)!!
-        assertEquals(MqttCommandPolicy.Action.ChangeEffect(Effect.SPECTRUM), MqttCommandPolicy.decide(spectrum, true))
-        assertEquals(MqttCommandPolicy.Action.ChangeEffect(Effect.SPECTRUM), MqttCommandPolicy.decide(spectrum, false))
+        assertEquals(MqttCommandPolicy.Action.ChangeEffect("SPECTRUM"), MqttCommandPolicy.decide(spectrum, true))
+        assertEquals(MqttCommandPolicy.Action.ChangeEffect("SPECTRUM"), MqttCommandPolicy.decide(spectrum, false))
         assertNull(MqttContract.parseCommand(MqttContract.EFFECT_COMMAND, "NOT_AN_EFFECT", false))
     }
 
@@ -91,6 +91,29 @@ class MqttContractTest {
         assertTrue(publications.any { it.topic == MqttContract.settingStateTopic("render_mode") && it.payload == "AUDIO" })
         assertTrue(publications.any { it.topic == MqttContract.settingDiscoveryTopic("brightness") && it.payload.contains("\"command_topic\"") })
         assertEquals(MqttCommandPolicy.Action.ReportConsentRequired, MqttCommandPolicy.decide(MqttContract.Command.On, false))
+    }
+
+    @Test fun silenceBrightnessFloorIsDiscoveredPublishedAndRangeChecked() {
+        val settings = AudioSettings.defaults().copy(brightness = .7f, videoAudioSilenceBrightnessFloor = .2f, renderMode = RenderMode.VIDEO_AUDIO)
+        val publications = MqttContract.snapshot(settings, false, "idle")
+        assertEquals("0.2", publications.first { it.topic == MqttContract.settingStateTopic("video_audio_silence_brightness_floor") }.payload)
+        assertTrue(publications.first { it.topic == MqttContract.settingDiscoveryTopic("video_audio_silence_brightness_floor") }.payload.contains("\"min\":0"))
+        assertEquals(.3f, MqttSettingsPolicy.apply(settings, MqttContract.Command.SetSetting("video_audio_silence_brightness_floor", ".3"))?.videoAudioSilenceBrightnessFloor)
+        assertNull(MqttSettingsPolicy.apply(settings, MqttContract.Command.SetSetting("video_audio_silence_brightness_floor", ".8")))
+    }
+
+    @Test fun mqttLivePolicyUsesTheSameWledVideoPreflightRuleAndCannotCreateInvalidFloor() {
+        val wled = WledDevice("mac:AABBCCDDEEFF", "TV", "192.168.1.2", 16, 21324)
+        val admitted = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity), brightness = .7f, videoAudioSilenceBrightnessFloor = .4f)
+        LiveRendererSettings.begin(admitted)
+        try {
+            assertFalse(LiveMqttSettingsPolicy.apply(admitted, MqttContract.Command.SetSetting("render_mode", "VIDEO")))
+            assertTrue(LiveMqttSettingsPolicy.apply(admitted, MqttContract.Command.SetSetting("brightness", ".2")))
+            val live = LiveRendererSettings.apply(admitted)
+            assertEquals(RenderMode.AUDIO, live.renderMode)
+            assertEquals(.2f, live.videoAudioSilenceBrightnessFloor)
+            assertTrue(live.valid())
+        } finally { LiveRendererSettings.end() }
     }
 
     @Test fun calibrationAndSelectedRoutesOnlyAcceptKnownInventory() {

@@ -388,6 +388,35 @@ object EffectRenderer {
     fun render(effect: Effect, f: AudioFeatures, brightness: Float, tick: Long): Rgb { val frame = renderImage(effect, f, brightness, tick); return Rgb(frame[0].toInt() and 255, frame[1].toInt() and 255, frame[2].toInt() and 255) }
 }
 
+/**
+ * Expands the reusable one-dimensional audio effect into the router's fixed RGB24 image.
+ *
+ * Capture owns one full-display shape for its entire lifetime, including live AUDIO
+ * transitions. Each output pixel (x, y) explicitly samples the matching audio strip pixel x,
+ * preserving the strip's horizontal effect while avoiding a per-frame allocation.
+ */
+class AudioToFullFrameRenderer(private val target: SourceFrameSpec) {
+    private val strip = EffectFrameRenderer(target.width)
+    private val fullFrame = ByteArray(target.bytes)
+
+    init { require(target.height > 0 && target.bytes <= HyperionFlatbuffer.MAX_IMAGE_BYTES) }
+
+    fun render(effect: Effect, features: AudioFeatures, brightness: Float, tick: Long, parameters: EffectParameters = EffectParameters()): ByteArray {
+        val row = strip.render(effect, features, brightness, tick, parameters)
+        for (y in 0 until target.height) {
+            val destination = y * target.width * 3
+            for (x in 0 until target.width) {
+                val source = x * 3
+                val output = destination + source
+                fullFrame[output] = row[source]
+                fullFrame[output + 1] = row[source + 1]
+                fullFrame[output + 2] = row[source + 2]
+            }
+        }
+        return fullFrame
+    }
+}
+
 /** Reusable bounded RGB24 filter; a black frame clears immediately to avoid stale light. */
 class RgbFrameSmoother(private val bytes: Int) {
     private val filtered = ByteArray(bytes)

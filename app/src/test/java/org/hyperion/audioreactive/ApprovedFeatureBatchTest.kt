@@ -46,7 +46,7 @@ class ApprovedFeatureBatchTest {
 
     @Test fun liveParameterEditsComposeFromTheCurrentLiveValue() {
         val persisted = EffectParameters(speed = 1f, trail = .2f, beatThreshold = .3f, hueShift = 0f)
-        LiveRendererSettings.begin()
+        LiveRendererSettings.begin(AudioSettings.defaults())
         try {
             LiveRendererSettings.updateParameters(persisted) { it.copy(speed = 2f) }
             LiveRendererSettings.updateParameters(persisted) { it.copy(trail = .8f) }
@@ -62,7 +62,7 @@ class ApprovedFeatureBatchTest {
     }
 
     @Test fun onlyRendererLocalControlsAreLiveMutable() {
-        assertEquals(setOf("Чутливість", "Яскравість", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри"), LiveRendererControlPolicy.sliderLabels)
+        assertEquals(setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри"), LiveRendererControlPolicy.sliderLabels)
         assertTrue(LiveRendererControlPolicy.sliderMutable("Яскравість"))
         assertFalse(LiveRendererControlPolicy.sliderMutable("FPS (Аудіо / Відео / Аудіо+відео)"))
         assertFalse(LiveRendererControlPolicy.sliderMutable("Зони джерела WLED"))
