@@ -44,6 +44,17 @@ object OutputUiPolicy {
     fun handlesCheckboxChange(synchronizing: Boolean) = !synchronizing
 }
 
+/** Local-only visual patterns. The existing main-screen button cycles these without an output route. */
+private enum class LocalVisualPattern(val label: String, val colors: IntArray?) {
+    RAINBOW("Райдужна анімація", null),
+    BLACK("Чорний", intArrayOf(Color.BLACK)),
+    WHITE("Білий", intArrayOf(Color.WHITE)),
+    RED("Червоний", intArrayOf(Color.RED)),
+    GREEN("Зелений", intArrayOf(Color.GREEN)),
+    BLUE("Синій", intArrayOf(Color.BLUE)),
+    RGB("RGB", intArrayOf(Color.RED, Color.GREEN, Color.BLUE)),
+}
+
 class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     companion object {
         const val EXTRA_IR_TOGGLE = "org.hyperion.audioreactive.IR_TOGGLE"
@@ -59,6 +70,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private val discoveryAdmissionGeneration = AtomicLong()
     private val rainbowHandler = Handler(Looper.getMainLooper())
     private var rainbowHue = 0f
+    // Starts before the first entry so the first press retains the old rainbow-test behavior.
+    private var localVisualPatternIndex = LocalVisualPattern.entries.lastIndex
     private lateinit var contentRoot: LinearLayout
     private val rainbowAnimator = object : Runnable {
         override fun run() {
@@ -75,8 +88,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var status: TextView
     private lateinit var captureButton: Button
     private lateinit var testButton: Button
-    private lateinit var outputTestButton: Button
-    private lateinit var diagnosticPatternSpinner: Spinner
     private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
     private lateinit var videoBox: CheckBox
@@ -249,13 +260,13 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         modeMutableRows += audioBox; modeMutableRows += videoBox
         addEffectSelector(panel)
         testButton = Button(this).apply {
-            text = "Тестове локальне зображення"
+            text = "Тестове зображення: ${LocalVisualPattern.entries[localVisualPatternIndex].label}"
             contentDescription = "Повноекранне локальне тестове зображення; без захоплення, маршруту, сокета або виходу"
-            setOnClickListener { showRainbowVisualSource() }
+            setOnClickListener { cycleLocalVisualPattern() }
         }
         panel.addView(testButton)
         panel.addView(TextView(this).apply {
-            text = "Тестове зображення змінює лише локальний повноекранний фон і доступне під час захоплення. Не запускає MediaProjection, маршрути, сокети або мережевий вихід. ${TestFrameActionPolicy.ACTIVE_CAPTURE_REASON}"
+            text = "Кнопка циклічно перемикає локальні шаблони на повноекранному фоні й доступна під час захоплення. Не запускає MediaProjection, маршрути, сокети або мережевий вихід."
         })
         panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })
         updateButton = Button(this).apply {
@@ -377,14 +388,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             RuntimeSettings.update { settings -> settings.copy(wledSourceZones = (it + 1) * 16) }
         }
         panel.addView(zonesRow)
-        panel.addView(TextView(this).apply { text = "Тест вибраного виходу — перед кожним запуском повторно перевіряє точний маршрут; під час захоплення заблокований; після кадрів завжди blackout/clear і закриття." })
-        diagnosticPatternSpinner = Spinner(this).apply {
-            id = View.generateViewId()
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, WledDiagnosticPattern.entries.map { it.label })
-        }
-        panel.addView(diagnosticPatternSpinner)
-        outputTestButton = Button(this).apply { text = "Надіслати тест вибраного виходу"; setOnClickListener { runSelectedOutputTest() } }
-        panel.addView(outputTestButton)
         panel.addView(Button(this).apply { text = "Налаштування MQTT"; setOnClickListener { showMqttSettingsDialog() } })
         panel.addView(TextView(this).apply { text = "Home Assistant MQTT: приватний LAN broker. Адреса, порт і облікові дані редагуються локально; пароль не публікується." })
     }
@@ -496,58 +499,24 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             AudioReactiveService.exists() || captureAdmissionLocked,
         )
 
-    /** Visual source only: it changes this Activity's background and starts no capture/output path. */
-    private fun showRainbowVisualSource() {
+    /** Existing main-screen control cycles patterns; it changes this Activity only. */
+    private fun cycleLocalVisualPattern() {
+        localVisualPatternIndex = (localVisualPatternIndex + 1) % LocalVisualPattern.entries.size
+        showLocalVisualPattern(LocalVisualPattern.entries[localVisualPatternIndex])
+    }
+
+    /** Visual source only: it changes this Activity background and starts no capture/output path. */
+    private fun showLocalVisualPattern(pattern: LocalVisualPattern) {
         RainbowVisualSourcePolicy.start()
         rainbowHandler.removeCallbacks(rainbowAnimator)
-        rainbowAnimator.run()
-    }
-
-    /** Retained internal diagnostic seam; it is not exposed as the screen-capture visual source. */
-    private fun runTestImage() {
-        if (!TestFrameActionPolicy.mayExecute(AudioReactiveService.exists())) {
-            status.text = TestFrameActionPolicy.ACTIVE_CAPTURE_REASON
-            return
-        }
-        val settings = RuntimeSettings.snapshot()
-        testButton.isEnabled = false
-        status.text = "Повторно перевіряю ${settings.outputMode.label} перед тестовим зображенням…"
-        work.execute {
-            // A capture may have been admitted after the click but before this queued task runs.
-            val sent = if (AudioReactiveService.exists()) false else runCatching { TestFrameAction.execute(settings) }.getOrDefault(false)
-            runOnUiThread {
-                if (!isFinishing) status.text = if (sent) "Тестове зображення надіслано до перевіреного ${settings.outputMode.label}." else "Вихід не вибрано, недоступний або змінився; тест не надіслано."
-                refreshCaptureUi()
-            }
-        }
-    }
-
-    /** Output diagnostic requires a freshly bound exact selected route and can never overlap capture. */
-    private fun runSelectedOutputTest() {
-        if (!TestFrameActionPolicy.mayExecute(AudioReactiveService.exists()) || captureAdmissionLocked) {
-            status.text = TestFrameActionPolicy.ACTIVE_CAPTURE_REASON
-            return
-        }
-        val settings = RuntimeSettings.snapshot()
-        val pattern = WledDiagnosticPattern.entries.getOrElse(diagnosticPatternSpinner.selectedItemPosition) { WledDiagnosticPattern.RGBW }
-        outputTestButton.isEnabled = false
-        diagnosticPatternSpinner.isEnabled = false
-        status.text = "Повторно перевіряю точний ${settings.outputMode.label} маршрут перед тестом…"
-        work.execute {
-            val sent = if (AudioReactiveService.exists()) false else runCatching {
-                when (settings.outputMode) {
-                    OutputMode.HYPERION -> TestFrameAction.execute(settings, pattern)
-                    OutputMode.WLED -> {
-                        val device = settings.selectedWledDevices().singleOrNull() ?: return@runCatching false
-                        val calibration = settings.calibrationFor(device) ?: return@runCatching false
-                        WledDiagnosticAction.execute(settings, device, calibration, pattern)
-                    }
-                }
-            }.getOrDefault(false)
-            runOnUiThread {
-                if (!isFinishing) status.text = if (sent) "Тест ${pattern.label} завершено; вихід очищено." else "Вихід не вибрано, змінився, не відкалібрований або недоступний; тест не надіслано."
-                refreshCaptureUi()
-            }
+        testButton.text = "Тестове зображення: ${pattern.label}"
+        status.text = "Локальний шаблон: ${pattern.label}. Мережевий вихід не використовується."
+        if (pattern == LocalVisualPattern.RAINBOW) {
+            rainbowAnimator.run()
+        } else {
+            val colors = requireNotNull(pattern.colors)
+            contentRoot.background = if (colors.size == 1) GradientDrawable().apply { setColor(colors.single()) }
+            else GradientDrawable(GradientDrawable.Orientation.TL_BR, colors)
         }
     }
 
@@ -664,10 +633,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         captureButton.text = if (active) OutputUiPolicy.DISABLE else OutputUiPolicy.ENABLE
         val locked = active || captureAdmissionLocked
         captureButton.isEnabled = !captureAdmissionLocked
-        // Local visual source is safe while capture owns a route; output diagnostics are not.
+        // The local visual source is safe while capture owns a route.
         testButton.isEnabled = !captureAdmissionLocked
-        outputTestButton.isEnabled = !locked
-        diagnosticPatternSpinner.isEnabled = !locked
         modeMutableRows.forEach { control ->
             if (control is LinearLayout) setChildrenEnabled(control, !locked) else control.isEnabled = !locked
         }

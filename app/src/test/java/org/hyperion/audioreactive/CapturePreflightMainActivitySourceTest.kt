@@ -37,12 +37,13 @@ class CapturePreflightMainActivitySourceTest {
         assertFalse(preflight.substringBefore("if (wled == null && hyperion == null)").contains("onReady()"))
     }
 
-    @Test fun outputTestPatternSelectorIsVisibleAndCannotOverlapCaptureAdmission() {
-        assertTrue(source.contains("diagnosticPatternSpinner = Spinner(this)"))
-        assertTrue(source.contains("WledDiagnosticPattern.entries.map { it.label }"))
-        assertTrue(source.contains("setOnClickListener { runSelectedOutputTest() }"))
-        assertTrue(source.contains("if (!TestFrameActionPolicy.mayExecute(AudioReactiveService.exists()) || captureAdmissionLocked)"))
-        assertTrue(source.contains("outputTestButton.isEnabled = !locked"))
-        assertTrue(source.contains("WledDiagnosticAction.execute(settings, device, calibration, pattern)"))
+    @Test fun existingMainScreenButtonCyclesLocalPatternsWithoutOutputDiagnostics() {
+        assertTrue(source.contains("setOnClickListener { cycleLocalVisualPattern() }"))
+        assertTrue(source.contains("private fun cycleLocalVisualPattern()"))
+        assertTrue(source.contains("private fun showLocalVisualPattern(pattern: LocalVisualPattern)"))
+        assertTrue(source.contains("Мережевий вихід не використовується."))
+        assertFalse(source.contains("diagnosticPatternSpinner = Spinner(this)"))
+        assertFalse(source.contains("outputTestButton = Button(this)"))
+        assertFalse(source.contains("private fun runSelectedOutputTest()"))
     }
 }

@@ -25,7 +25,9 @@ class RainbowVisualSourceTest {
         assertTrue(source.contains("contentRoot.background = GradientDrawable"))
         assertTrue(source.contains("RainbowVisualSourcePolicy.start()"))
         assertTrue(source.contains("testButton.isEnabled = !captureAdmissionLocked"))
-        assertTrue(source.contains("TestFrameActionPolicy.ACTIVE_CAPTURE_REASON"))
+        assertTrue(source.contains("setOnClickListener { cycleLocalVisualPattern() }"))
+        assertTrue(source.contains("Мережевий вихід не використовується."))
+        assertFalse(source.contains("private fun runSelectedOutputTest()"))
         assertFalse(source.contains("RainbowVisualActivity"))
         assertFalse(source.contains("startActivity(Intent(this, RainbowVisualActivity::class.java))"))
     }
