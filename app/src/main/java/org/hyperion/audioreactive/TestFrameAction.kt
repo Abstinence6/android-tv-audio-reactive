@@ -25,12 +25,14 @@ internal object TestFrameAction {
     /** Returns false unless the current selected route gets a newly-created, one-shot binding. */
     fun execute(
         settings: AudioSettings,
+        pattern: WledDiagnosticPattern = WledDiagnosticPattern.RGBW,
         wledPreflight: (AudioSettings) -> String? = WledCapturePreflight::bind,
         hyperionPreflight: (AudioSettings) -> String? = HyperionCapturePreflight::bind,
         wledSender: (List<WledDevice>, ByteArray) -> Unit = ::sendWled,
         hyperionSender: (HyperionDevice, ByteArray) -> Unit = ::sendHyperion,
     ): Boolean {
-        return when (settings.outputMode) {
+        if (!OutputDiagnosticAdmission.reserveDiagnostic()) return false
+        return try { when (settings.outputMode) {
             OutputMode.WLED -> {
                 val binding = wledPreflight(settings) ?: return false
                 val targets = WledRouteBindings.consume(binding, settings) ?: return false
@@ -41,20 +43,21 @@ internal object TestFrameAction {
             OutputMode.HYPERION -> {
                 val binding = hyperionPreflight(settings) ?: return false
                 val target = HyperionRouteBindings.consume(binding, settings) ?: return false
-                hyperionSender(target, frame)
+                diagnosticFrames(pattern).forEach { diagnostic -> hyperionSender(target, diagnostic) }
                 true
             }
-        }
+        } } finally { OutputDiagnosticAdmission.releaseDiagnostic() }
     }
+
+    /** Hyperion accepts the same small RGB image layout as its legacy 16-pixel diagnostic. */
+    private fun diagnosticFrames(pattern: WledDiagnosticPattern): List<ByteArray> =
+        if (pattern == WledDiagnosticPattern.RGBW) listOf(frame)
+        else WledDiagnosticPackets.frames(WledScreenCalibration.proportional("diagnostic", 16), pattern)
 
     private fun sendWled(targets: List<WledDevice>, frame: ByteArray) {
         targets.forEach { device ->
             WledRealtimeOutput(device).also { output ->
-                try {
-                    output.send(frame)
-                } finally {
-                    output.close()
-                }
+                try { output.send(frame) } finally { try { output.blackout() } finally { output.close() } }
             }
         }
     }

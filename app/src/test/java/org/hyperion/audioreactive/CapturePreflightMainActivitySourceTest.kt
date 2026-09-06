@@ -36,4 +36,13 @@ class CapturePreflightMainActivitySourceTest {
         assertTrue(preflight.contains("onReady()"))
         assertFalse(preflight.substringBefore("if (wled == null && hyperion == null)").contains("onReady()"))
     }
+
+    @Test fun outputTestPatternSelectorIsVisibleAndCannotOverlapCaptureAdmission() {
+        assertTrue(source.contains("diagnosticPatternSpinner = Spinner(this)"))
+        assertTrue(source.contains("WledDiagnosticPattern.entries.map { it.label }"))
+        assertTrue(source.contains("setOnClickListener { runSelectedOutputTest() }"))
+        assertTrue(source.contains("if (!TestFrameActionPolicy.mayExecute(AudioReactiveService.exists()) || captureAdmissionLocked)"))
+        assertTrue(source.contains("outputTestButton.isEnabled = !locked"))
+        assertTrue(source.contains("WledDiagnosticAction.execute(settings, device, calibration, pattern)"))
+    }
 }

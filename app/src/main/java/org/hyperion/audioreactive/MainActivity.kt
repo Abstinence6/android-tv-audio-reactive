@@ -18,11 +18,13 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.view.ViewGroup
+import android.text.InputType
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.graphics.drawable.GradientDrawable
@@ -73,6 +75,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var status: TextView
     private lateinit var captureButton: Button
     private lateinit var testButton: Button
+    private lateinit var outputTestButton: Button
+    private lateinit var diagnosticPatternSpinner: Spinner
     private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
     private lateinit var videoBox: CheckBox
@@ -373,7 +377,16 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             RuntimeSettings.update { settings -> settings.copy(wledSourceZones = (it + 1) * 16) }
         }
         panel.addView(zonesRow)
-        panel.addView(TextView(this).apply { text = "Home Assistant MQTT — anonymous LAN listener tcp://192.168.1.1:1883. LAN observers and attackers can read/send allowed commands." })
+        panel.addView(TextView(this).apply { text = "Тест вибраного виходу — перед кожним запуском повторно перевіряє точний маршрут; під час захоплення заблокований; після кадрів завжди blackout/clear і закриття." })
+        diagnosticPatternSpinner = Spinner(this).apply {
+            id = View.generateViewId()
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, WledDiagnosticPattern.entries.map { it.label })
+        }
+        panel.addView(diagnosticPatternSpinner)
+        outputTestButton = Button(this).apply { text = "Надіслати тест вибраного виходу"; setOnClickListener { runSelectedOutputTest() } }
+        panel.addView(outputTestButton)
+        panel.addView(Button(this).apply { text = "Налаштування MQTT"; setOnClickListener { showMqttSettingsDialog() } })
+        panel.addView(TextView(this).apply { text = "Home Assistant MQTT: приватний LAN broker. Адреса, порт і облікові дані редагуються локально; пароль не публікується." })
     }
 
     private fun updateEffectParameters(transform: (EffectParameters) -> EffectParameters) {
@@ -448,7 +461,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         work.execute {
             when (mode) {
                 OutputMode.WLED -> {
-                    val found = WledDiscovery.scan()
+                    val found = WledDiscovery.scan(this@MainActivity)
                     runOnUiThread {
                         if (canMergeDiscovery(discoveryGeneration, mode)) {
                             latestWled = found.map { it.identity }.toSet()
@@ -507,6 +520,62 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 refreshCaptureUi()
             }
         }
+    }
+
+    /** Output diagnostic requires a freshly bound exact selected route and can never overlap capture. */
+    private fun runSelectedOutputTest() {
+        if (!TestFrameActionPolicy.mayExecute(AudioReactiveService.exists()) || captureAdmissionLocked) {
+            status.text = TestFrameActionPolicy.ACTIVE_CAPTURE_REASON
+            return
+        }
+        val settings = RuntimeSettings.snapshot()
+        val pattern = WledDiagnosticPattern.entries.getOrElse(diagnosticPatternSpinner.selectedItemPosition) { WledDiagnosticPattern.RGBW }
+        outputTestButton.isEnabled = false
+        diagnosticPatternSpinner.isEnabled = false
+        status.text = "Повторно перевіряю точний ${settings.outputMode.label} маршрут перед тестом…"
+        work.execute {
+            val sent = if (AudioReactiveService.exists()) false else runCatching {
+                when (settings.outputMode) {
+                    OutputMode.HYPERION -> TestFrameAction.execute(settings, pattern)
+                    OutputMode.WLED -> {
+                        val device = settings.selectedWledDevices().singleOrNull() ?: return@runCatching false
+                        val calibration = settings.calibrationFor(device) ?: return@runCatching false
+                        WledDiagnosticAction.execute(settings, device, calibration, pattern)
+                    }
+                }
+            }.getOrDefault(false)
+            runOnUiThread {
+                if (!isFinishing) status.text = if (sent) "Тест ${pattern.label} завершено; вихід очищено." else "Вихід не вибрано, змінився, не відкалібрований або недоступний; тест не надіслано."
+                refreshCaptureUi()
+            }
+        }
+    }
+
+    /** Local-only broker editor; save persists first and the MQTT service reconnects via its listener. */
+    private fun showMqttSettingsDialog() {
+        val current = RuntimeSettings.snapshot().mqttBroker
+        fun field(label: String, value: String, type: Int = InputType.TYPE_CLASS_TEXT): EditText = EditText(this).apply { hint = label; setText(value); inputType = type }
+        val ip = field("IPv4 broker", current.ip)
+        val port = field("Порт", current.port.toString(), InputType.TYPE_CLASS_NUMBER)
+        val username = field("Логін (необов’язково)", current.username)
+        val password = field("Пароль (необов’язково)", current.password, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 8); addView(ip); addView(port); addView(username); addView(password) }
+        AlertDialog.Builder(this).setTitle("Home Assistant MQTT")
+            .setMessage("Дозволено лише literal private RFC1918 IPv4 та порт 1–65535. Порожній логін використовує anonymous MQTT.")
+            .setView(form).setNegativeButton("Скасувати", null)
+            .setPositiveButton("Зберегти", null).create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val result = MqttBrokerSettings.fromInput(ip.text.toString(), port.text.toString(), username.text.toString(), password.text.toString())
+                        val broker = result.settings
+                        if (broker == null) { ip.error = result.error; return@setOnClickListener }
+                        RuntimeSettings.update { it.copy(mqttBroker = broker) }
+                        status.text = "MQTT broker збережено; перепідключення виконується."
+                        dialog.dismiss()
+                    }
+                }
+                dialog.show()
+            }
     }
 
     private fun renderOutputUi() {
@@ -595,8 +664,10 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         captureButton.text = if (active) OutputUiPolicy.DISABLE else OutputUiPolicy.ENABLE
         val locked = active || captureAdmissionLocked
         captureButton.isEnabled = !captureAdmissionLocked
-        // Local visual source is safe while capture owns a route; output diagnostics are not exposed then.
+        // Local visual source is safe while capture owns a route; output diagnostics are not.
         testButton.isEnabled = !captureAdmissionLocked
+        outputTestButton.isEnabled = !locked
+        diagnosticPatternSpinner.isEnabled = !locked
         modeMutableRows.forEach { control ->
             if (control is LinearLayout) setChildrenEnabled(control, !locked) else control.isEnabled = !locked
         }

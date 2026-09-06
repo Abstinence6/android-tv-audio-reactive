@@ -38,10 +38,13 @@ class MqttControlService : Service(), MqttCallbackExtended {
     }
 
     private var client: MqttAsyncClient? = null
+    private var connectedBroker: MqttBrokerSettings? = null
     @Volatile private var connected = false
     private val snapshotHandler = Handler(Looper.getMainLooper())
     private var snapshotScheduled = false
-    private val settingsListener: (AudioSettings) -> Unit = { requestSnapshot() }
+    private val settingsListener: (AudioSettings) -> Unit = { settings ->
+        if (settings.mqttBroker != connectedBroker) reconnectFor(settings.mqttBroker) else requestSnapshot()
+    }
 
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -59,21 +62,24 @@ class MqttControlService : Service(), MqttCallbackExtended {
     }
 
     private fun connect() {
-        check(MqttContract.validBroker(MqttContract.BROKER_URI))
-        val instance = MqttAsyncClient(MqttContract.BROKER_URI, "${MqttContract.DEVICE_ID}-${UUID.randomUUID().toString().take(8)}", null)
+        val broker = RuntimeSettings.snapshot().mqttBroker
+        if (!broker.valid()) return
+        connectedBroker = broker
+        val instance = MqttAsyncClient(MqttClientPolicy.uri(broker), "${MqttContract.DEVICE_ID}-${UUID.randomUUID().toString().take(8)}", null)
         client = instance
         instance.setCallback(this)
+        val policyOptions = MqttClientPolicy.options(broker)
         val options = MqttConnectOptions().apply {
             isAutomaticReconnect = true
             isCleanSession = true
             connectionTimeout = 10
             keepAliveInterval = 30
             setWill(MqttContract.AVAILABILITY, "offline".toByteArray(), 1, true)
+            policyOptions.username?.let(::setUserName)
+            policyOptions.password?.let(::setPassword)
         }
         runCatching {
             instance.connect(options, null, object : IMqttActionListener {
-                // This callback is the authoritative initial-session signal. CallbackExtended
-                // covers subsequent automatic reconnects; both use the same idempotent path.
                 override fun onSuccess(asyncActionToken: IMqttToken?) = onConnected(instance)
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) = onConnectionFailure(instance)
             })
@@ -84,7 +90,7 @@ class MqttControlService : Service(), MqttCallbackExtended {
         if (client !== instance || connected) return
         connected = true
 
-        runCatching { instance.subscribe(arrayOf(MqttContract.CAPTURE_COMMAND, MqttContract.EFFECT_COMMAND), intArrayOf(1, 1)) }
+        runCatching { instance.subscribe(arrayOf(MqttContract.CAPTURE_COMMAND, MqttContract.EFFECT_COMMAND, "${MqttContract.ROOT}/settings/#", "${MqttContract.ROOT}/routes/#", "${MqttContract.ROOT}/calibration/#"), intArrayOf(1, 1, 1, 1, 1)) }
         // Always publish a complete retained snapshot after initial connect and every reconnect.
         publishSnapshot()
     }
@@ -99,9 +105,7 @@ class MqttControlService : Service(), MqttCallbackExtended {
         stopSelf()
     }
 
-    override fun connectComplete(reconnect: Boolean, serverURI: String?) {
-        if (serverURI == MqttContract.BROKER_URI) client?.let(::onConnected)
-    }
+    override fun connectComplete(reconnect: Boolean, serverURI: String?) { client?.let(::onConnected) }
     override fun connectionLost(cause: Throwable?) { connected = false }
     override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
     override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -111,6 +115,7 @@ class MqttControlService : Service(), MqttCallbackExtended {
             MqttCommandPolicy.Action.ReportConsentRequired -> publishSnapshot("needs_media_projection_consent")
             MqttCommandPolicy.Action.StopOwnedCapture -> AudioReactiveService.stopExisting(this)
             is MqttCommandPolicy.Action.ChangeEffect -> RuntimeSettings.update { it.copy(effect = action.effect) }
+            is MqttCommandPolicy.Action.ChangeSetting -> MqttSettingsPolicy.apply(RuntimeSettings.snapshot(), action.update)?.let(RuntimeSettings::apply)
             MqttCommandPolicy.Action.Ignore -> Unit
         }
         if (command != null && action !is MqttCommandPolicy.Action.ReportConsentRequired) publishSnapshot()
@@ -136,6 +141,16 @@ class MqttControlService : Service(), MqttCallbackExtended {
             snapshotScheduled = false
             if (connected) publishSnapshot()
         }, 100L)
+    }
+    /** Persisted broker settings changed: discard the old client before creating the new one. */
+    private fun reconnectFor(broker: MqttBrokerSettings) {
+        if (client == null || !broker.valid()) return
+        val old = client
+        connected = false
+        client = null
+        runCatching { old?.disconnect(2_000) }
+        runCatching { old?.close() }
+        connect()
     }
     private fun stopControl() {
         val c = client

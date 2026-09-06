@@ -14,7 +14,8 @@ class AudioReactiveServiceAdmissionSourceTest {
 
     @Test fun serviceGatesAdmissionAndForegroundStartupAgainstTeardown() {
         assertTrue(source.contains("private val lifecycle = CaptureServiceLifecycle(::performTeardown)"))
-        assertTrue(source.contains("if(!lifecycle.beginStart { admission.reserve(ids) }) { admission.discardLifecycleRejectedStart(ids); return START_NOT_STICKY }"))
+        assertTrue(source.contains("OutputDiagnosticAdmission.reserveCapture()"))
+        assertTrue(source.contains("else if(admission.reserve(ids)) true"))
         assertTrue(source.contains("if(!lifecycle.whileStarting { channel(); startForeground"))
     }
 
@@ -35,7 +36,7 @@ class AudioReactiveServiceAdmissionSourceTest {
 
     @Test fun serviceStopsRouterBeforeAdmissionAndRetainsPublicSafeFailureDiagnostic() {
         val routerStop = source.indexOf("attempt(\"router\"){router?.stop()")
-        val admissionFinish = source.indexOf("attempt(\"admission\"){admission.finish()}")
+        val admissionFinish = source.indexOf("attempt(\"admission\"){admission.finish();OutputDiagnosticAdmission.releaseCapture()}")
         assertTrue(routerStop >= 0 && admissionFinish > routerStop)
         assertTrue(source.contains("STARTUP_FAILURE_DIAGNOSTIC"))
         assertTrue(source.contains("CLEANUP_FAILURE_DIAGNOSTIC"))

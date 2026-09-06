@@ -2,6 +2,12 @@ package org.hyperion.audioreactive
 
 /** Physical, bounded WLED diagnostics. The caller must select exactly this MAC; nothing persists or reconfigures WLED. */
 enum class WledDiagnosticPattern(val label: String) {
+    RGBW("RGBW: червоний, зелений, синій, білий"),
+    GRADIENT("Градієнт"),
+    CHECKERBOARD("Шахівниця"),
+    STRIPES("Смуги"),
+    GRID_CORNERS("Сітка і кути"),
+    BLACK("Чорний / blackout"),
     SINGLE_PIXEL_CHASE("Один піксель: chase"),
     DIRECTION_CHASE("Напрямок: chase"),
     FOUR_EDGE_COLORS("Чотири краї: кольори"),
@@ -20,6 +26,19 @@ object WledDiagnosticPackets {
             val at = index * 3; bytes[at] = r.toByte(); bytes[at + 1] = g.toByte(); bytes[at + 2] = b.toByte()
         }
         return when (pattern) {
+            WledDiagnosticPattern.RGBW -> listOf(frame().also { bytes ->
+                val colors = arrayOf(intArrayOf(255, 0, 0), intArrayOf(0, 255, 0), intArrayOf(0, 0, 255), intArrayOf(255, 255, 255))
+                repeat(count) { logical -> colors[(logical * 4) / count].let { put(bytes, logical, it[0], it[1], it[2]) } }
+            })
+            WledDiagnosticPattern.GRADIENT -> listOf(frame().also { bytes -> repeat(count) { logical ->
+                val hue = logical * 360f / count; val color = android.graphics.Color.HSVToColor(floatArrayOf(hue, 1f, 1f)); put(bytes, logical, android.graphics.Color.red(color), android.graphics.Color.green(color), android.graphics.Color.blue(color))
+            } })
+            WledDiagnosticPattern.CHECKERBOARD -> listOf(frame().also { bytes -> repeat(count) { logical -> if (logical % 2 == 0) put(bytes, logical, 255, 255, 255) } })
+            WledDiagnosticPattern.STRIPES -> listOf(frame().also { bytes -> repeat(count) { logical -> if ((logical / 3) % 2 == 0) put(bytes, logical, 255, 0, 255) else put(bytes, logical, 0, 255, 255) } })
+            WledDiagnosticPattern.GRID_CORNERS -> listOf(frame().also { bytes ->
+                var logical = 0; ScreenEdge.entries.forEachIndexed { index, edge -> if (calibration.allocation(edge) > 0) { val color = arrayOf(intArrayOf(255,0,0),intArrayOf(0,255,0),intArrayOf(0,0,255),intArrayOf(255,255,255))[index]; put(bytes, logical, color[0], color[1], color[2]) }; logical += calibration.allocation(edge) }
+            })
+            WledDiagnosticPattern.BLACK -> listOf(frame())
             WledDiagnosticPattern.SINGLE_PIXEL_CHASE -> (0 until minOf(count, MAX_FRAMES)).map { n -> frame().also { put(it, n, 255, 255, 255) } }
             WledDiagnosticPattern.DIRECTION_CHASE -> (0 until minOf(count, MAX_FRAMES)).map { n -> frame().also { put(it, n, 0, 255, 255); put(it, (n + 1) % count, 255, 0, 255) } }
             WledDiagnosticPattern.FOUR_EDGE_COLORS -> listOf(frame().also { bytes ->
@@ -57,20 +76,19 @@ internal object WledDiagnosticAction {
             } }
         },
     ): Boolean {
-        if (settings.outputMode != OutputMode.WLED || !calibration.validFor(device)) return false
-        // A wizard draft is not persisted until the user saves it.  Scope it to this one
-        // read-only preflight only, so diagnostics validate the exact draft without relaxing
-        // production capture routeability or altering any saved calibration.
-        val onlyTarget = settings.copy(
-            selectedWledIdentities = setOf(device.identity),
-            wledCalibrations = listOf(calibration),
-        )
-        val binding = preflight(onlyTarget) ?: return false
-        val fresh = WledRouteBindings.consume(binding, onlyTarget)?.singleOrNull() ?: return false
-        if (fresh != device) return false
-        val output = create(fresh)
-        try { WledDiagnosticPackets.frames(calibration, pattern).forEach(output::send) }
-        finally { try { output.blackout() } finally { output.close() } }
-        return true
+        if (!OutputDiagnosticAdmission.reserveDiagnostic()) return false
+        try {
+            if (settings.outputMode != OutputMode.WLED || !calibration.validFor(device)) return false
+            // A wizard draft is not persisted until the user saves it. Scope it to this one
+            // read-only preflight only, so diagnostics validate the exact draft without relaxing capture.
+            val onlyTarget = settings.copy(selectedWledIdentities = setOf(device.identity), wledCalibrations = listOf(calibration))
+            val binding = preflight(onlyTarget) ?: return false
+            val fresh = WledRouteBindings.consume(binding, onlyTarget)?.singleOrNull() ?: return false
+            if (fresh != device) return false
+            val output = create(fresh)
+            try { WledDiagnosticPackets.frames(calibration, pattern).forEach(output::send) }
+            finally { try { output.blackout() } finally { output.close() } }
+            return true
+        } finally { OutputDiagnosticAdmission.releaseDiagnostic() }
     }
 }

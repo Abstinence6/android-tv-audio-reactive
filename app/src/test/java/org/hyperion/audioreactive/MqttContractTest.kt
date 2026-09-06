@@ -26,13 +26,12 @@ class MqttContractTest {
         val snapshot = MqttContract.snapshot(AudioSettings.defaults(), false, "needs_media_projection_consent")
         assertEquals(listOf(
             MqttContract.AVAILABILITY, MqttContract.CAPTURE_DISCOVERY, MqttContract.EFFECT_DISCOVERY,
-            MqttContract.DIAGNOSTIC_DISCOVERY, MqttContract.CAPTURE_STATE, MqttContract.EFFECT_STATE,
-            MqttContract.STATUS, MqttContract.DIAGNOSTIC_STATE, MqttContract.DIAGNOSTIC_ATTRIBUTES,
-        ), snapshot.map { it.topic })
+            MqttContract.DIAGNOSTIC_DISCOVERY,
+        ), snapshot.take(4).map { it.topic })
         assertTrue(snapshot.all { it.retained })
         assertEquals("online", snapshot.first().payload)
-        assertEquals("OFF", snapshot[4].payload)
-        assertEquals("NEEDS_MEDIA_PROJECTION_CONSENT", snapshot[7].payload)
+        assertEquals("OFF", snapshot.first { it.topic == MqttContract.CAPTURE_STATE }.payload)
+        assertEquals("NEEDS_MEDIA_PROJECTION_CONSENT", snapshot.first { it.topic == MqttContract.DIAGNOSTIC_STATE }.payload)
     }
 
     @Test fun diagnosticSensorIsReadOnlyDiagnosticAndNeverAddsACommandTopic() {
@@ -79,5 +78,47 @@ class MqttContractTest {
         assertEquals(MqttCommandPolicy.Action.ChangeEffect(Effect.SPECTRUM), MqttCommandPolicy.decide(spectrum, true))
         assertEquals(MqttCommandPolicy.Action.ChangeEffect(Effect.SPECTRUM), MqttCommandPolicy.decide(spectrum, false))
         assertNull(MqttContract.parseCommand(MqttContract.EFFECT_COMMAND, "NOT_AN_EFFECT", false))
+    }
+
+    @Test fun settingsCommandsAreNonRetainedStrictAndRangeCheckedWithoutCaptureConsent() {
+        val brightness = MqttContract.parseCommand(MqttContract.SETTINGS_COMMAND, "{\"field\":\"brightness\",\"value\":\"0.8\"}", false) as MqttContract.Command.SetSetting
+        assertEquals(.8f, MqttSettingsPolicy.apply(AudioSettings.defaults(), brightness)?.brightness)
+        assertNull(MqttContract.parseCommand(MqttContract.SETTINGS_COMMAND, "{\"value\":\"0.8\",\"field\":\"brightness\"}", false))
+        assertNull(MqttContract.parseCommand(MqttContract.SETTINGS_COMMAND, "{\"field\":\"host\",\"value\":\"8.8.8.8\"}", false))
+        assertNull(MqttContract.parseCommand(MqttContract.SETTINGS_COMMAND, "{\"field\":\"brightness\",\"value\":\"0.8\"}", true))
+        assertNull(MqttSettingsPolicy.apply(AudioSettings.defaults(), MqttContract.Command.SetSetting("brightness", "4")))
+        val publications = MqttContract.snapshot(AudioSettings.defaults(), false, "idle")
+        assertTrue(publications.any { it.topic == MqttContract.settingStateTopic("render_mode") && it.payload == "AUDIO" })
+        assertTrue(publications.any { it.topic == MqttContract.settingDiscoveryTopic("brightness") && it.payload.contains("\"command_topic\"") })
+        assertEquals(MqttCommandPolicy.Action.ReportConsentRequired, MqttCommandPolicy.decide(MqttContract.Command.On, false))
+    }
+
+    @Test fun calibrationAndSelectedRoutesOnlyAcceptKnownInventory() {
+        val device = WledDevice("mac:AABBCCDDEEFF", "TV", "10.1.2.3", 16, 21324)
+        val base = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(device))
+        val selected = MqttSettingsPolicy.apply(base, MqttContract.Command.SetSetting("selected_wled_identities", device.identity))!!
+        assertEquals(setOf(device.identity), selected.selectedWledIdentities)
+        assertNull(MqttSettingsPolicy.apply(base, MqttContract.Command.SetSetting("selected_wled_identities", "mac:FFFFFFFFFFFF")))
+        val calibration = MqttSettingsPolicy.apply(base, MqttContract.Command.SetSetting("calibration_gamma", "${device.identity},2.0"))
+        assertEquals(2f, calibration?.calibrationFor(device)?.gamma)
+    }
+
+    @Test fun discoveryCreatesUsableEntitiesForPersistedSettingsRoutesAndCalibration() {
+        val wled = WledDevice("mac:AABBCCDDEEFF", "TV", "10.1.2.3", 16, 21324)
+        val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "Hyperion", "192.168.1.2")
+        val settings = AudioSettings.defaults().copy(wledDevices = listOf(wled), hyperionDevices = listOf(hyperion))
+        val publications = MqttContract.snapshot(settings, false, "idle")
+        val brightness = publications.first { it.topic == MqttContract.settingDiscoveryTopic("brightness") }.payload
+        assertTrue(brightness.contains("\"command_topic\":\"${MqttContract.settingCommandTopic("brightness")}\""))
+        assertTrue(brightness.contains("\"min\":0"))
+        assertTrue(brightness.contains("\"max\":1"))
+        val route = publications.first { it.topic == MqttContract.wledRouteDiscoveryTopic(wled.identity) }.payload
+        assertTrue(route.contains("\"command_topic\":\"${MqttContract.wledRouteCommandTopic(wled.identity)}\""))
+        val gamma = publications.first { it.topic == MqttContract.calibrationDiscoveryTopic(wled.identity, "gamma") }.payload
+        assertTrue(gamma.contains("\"command_topic\":\"${MqttContract.calibrationCommandTopic(wled.identity, "gamma")}\""))
+        assertEquals(MqttContract.Command.SetSetting("brightness", "0.8"), MqttContract.parseCommand(MqttContract.settingCommandTopic("brightness"), "0.8", false))
+        assertEquals(MqttContract.Command.SetSetting("selected_wled_identities", "${wled.identity},ON"), MqttContract.parseCommand(MqttContract.wledRouteCommandTopic(wled.identity), "ON", false))
+        assertEquals(MqttContract.Command.SetSetting("calibration_gamma", "${wled.identity},2.0"), MqttContract.parseCommand(MqttContract.calibrationCommandTopic(wled.identity, "gamma"), "2.0", false))
+        assertEquals(MqttContract.Command.SetSetting("selected_hyperion_identity", "none"), MqttContract.parseCommand(MqttContract.hyperionRouteCommandTopic(), "none", false))
     }
 }

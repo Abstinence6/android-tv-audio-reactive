@@ -33,7 +33,11 @@ class AudioReactiveService : Service() {
   val generation=intent?.getLongExtra(EXTRA_ADMISSION_GENERATION,Long.MIN_VALUE)?:Long.MIN_VALUE
   val ids=RouteBindingIds(intent?.getStringExtra(EXTRA_WLED_ROUTE_BINDING),intent?.getStringExtra(EXTRA_HYPERION_ROUTE_BINDING))
   // The lifecycle gate linearizes route admission against onStop/onDestroy cancellation.
-  if(!lifecycle.beginStart { admission.reserve(ids) }) { admission.discardLifecycleRejectedStart(ids); return START_NOT_STICKY }
+  if(!lifecycle.beginStart {
+   if(!OutputDiagnosticAdmission.reserveCapture()) false
+   else if(admission.reserve(ids)) true
+   else { OutputDiagnosticAdmission.releaseCapture(); false }
+  }) { admission.discardLifecycleRejectedStart(ids); return START_NOT_STICKY }
   val data=intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
   if(intent?.getIntExtra(EXTRA_RESULT_CODE,0)!=Activity.RESULT_OK||data==null){rejectInvalidStart(generation);return START_NOT_STICKY}
   val frozen=RuntimeSettings.snapshot()
@@ -88,7 +92,7 @@ class AudioReactiveService : Service() {
   attempt("running"){running.set(false)}
   // A consumed router owns its route until stopped; only then can admission be reopened.
   attempt("router"){router?.stop();router=null}
-  attempt("admission"){admission.finish()}
+  attempt("admission"){admission.finish();OutputDiagnosticAdmission.releaseCapture()}
   attempt("recorder.stop"){recorder?.stop()};attempt("recorder.release"){recorder?.release();recorder=null};attempt("display"){display?.release();display=null};attempt("reader"){reader?.close();reader=null};attempt("projection"){projection?.stop();projection=null};attempt("renderer"){LiveRendererSettings.end()};attempt("alive"){alive=false}
   attempt("status"){if(status.isActive)status=CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT};attempt("local status"){if(status==CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT)LocalStatusStore.reset()}
   if(failures.isNotEmpty()){Log.w(TAG,"$CLEANUP_FAILURE_DIAGNOSTIC: ${failures.joinToString()}")}
