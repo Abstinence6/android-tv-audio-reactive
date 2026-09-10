@@ -18,7 +18,14 @@ class AudioFeatures(
     var treble: Float,
     val bands: FloatArray = FloatArray(BAND_COUNT),
     /** True only after the analyzer's gate accepts actual PCM energy. */
-    var signalPresent: Boolean = rms > 0f || peak > 0f
+    var signalPresent: Boolean = rms > 0f || peak > 0f,
+    /** Monotonic accepted acoustic beat event identifier; zero means no event has been accepted. */
+    var beatSequence: Long = 0L,
+    /** Strength and timestamp describe the latest accepted event, never a synthesized cadence. */
+    var beatStrength: Float = 0f,
+    var beatTimestampNanos: Long = 0L,
+    var tempoBpm: Float = 0f,
+    var tempoConfidence: Float = 0f
 ) {
     companion object { const val BAND_COUNT = 16 }
 }
@@ -73,17 +80,44 @@ class PcmAnalyzer {
     private var previousLevel = 0f
     private var onsetBaseline = 0f
     private var onsetRefractoryFrames = 0
+    // Beat state is fixed-size: no per-block collections, and timestamps—not render frames—drive it.
+    private val beatIntervalsNanos = LongArray(BEAT_HISTORY_SIZE)
+    private var beatIntervalCount = 0
+    private var beatIntervalCursor = 0
+    private var beatNoveltyBaseline = 0f
+    private var previousBeatEnergy = 0f
+    private var lastBeatTimestampNanos = Long.MIN_VALUE
+    private var analysisTimestampNanos = 0L
+    private var beatSequence = 0L
+    private var beatStrength = 0f
+    private var tempoBpm = 0f
+    private var tempoConfidence = 0f
+    private var configuredBeatThreshold = .2f
+    private var suppliedTimestampNanos = -1L
 
     fun reset() {
         bands.fill(0f); bandEnvelope.fill(0f); bandPeak.fill(MIN_BAND_PEAK); bandNoiseFloor.fill(0f)
         smoothedLevel = 0f; adaptivePeak = MIN_ADAPTIVE_PEAK; noiseFloor = 0f; previousLevel = 0f
         onsetBaseline = 0f; onsetRefractoryFrames = 0
+        resetBeatState(clearSequence = true)
+        analysisTimestampNanos = 0L
+        configuredBeatThreshold = .2f; suppliedTimestampNanos = -1L
+    }
+
+    /** Supplies live persisted threshold and capture-time monotonic timestamp without allocating. */
+    fun configureBeatTracking(beatThreshold: Float, timestampNanos: Long) {
+        configuredBeatThreshold = beatThreshold.coerceIn(.05f, .95f)
+        suppliedTimestampNanos = timestampNanos
     }
 
     fun analyze(pcm: ShortArray, sensitivity: Float): AudioFeatures = analyze(pcm, pcm.size, sensitivity)
+    fun analyze(pcm: ShortArray, sampleCount: Int, sensitivity: Float): AudioFeatures = analyze(pcm, sampleCount, sensitivity, configuredBeatThreshold, takeTimestamp(sampleCount))
 
-    fun analyze(pcm: ShortArray, sampleCount: Int, sensitivity: Float): AudioFeatures {
+    /** The capture path supplies System.nanoTime(); tests supply deterministic monotonic timestamps. */
+    fun analyze(pcm: ShortArray, sampleCount: Int, sensitivity: Float, beatThreshold: Float, timestampNanos: Long): AudioFeatures {
         val count = sampleCount.coerceIn(0, pcm.size)
+        val timestamp = timestampNanos.coerceAtLeast(analysisTimestampNanos)
+        analysisTimestampNanos = timestamp
         if (count == 0) {
             decayToSilence()
             previousLevel = smoothedLevel
@@ -119,17 +153,75 @@ class PcmAnalyzer {
         val bass = averageBands(0, 4)
         val mid = averageBands(5, 10)
         val treble = averageBands(11, AudioFeatures.BAND_COUNT)
+        updateBeat(bass, mid, smoothedLevel, gated > 0f, beatThreshold, timestamp)
         return setFeatures(smoothedLevel, (peak * gain).coerceIn(0f, 1f), onset, bass, mid, treble, gated > 0f)
     }
 
-    private fun features(rms: Float, peak: Float, onset: Float) = setFeatures(rms, peak, onset, 0f, 0f, 0f, false)
+    private fun features(rms: Float, peak: Float, onset: Float): AudioFeatures {
+        resetBeatState(clearSequence = false)
+        return setFeatures(rms, peak, onset, 0f, 0f, 0f, false)
+    }
     private fun setFeatures(rms: Float, peak: Float, onset: Float, bass: Float, mid: Float, treble: Float, signalPresent: Boolean): AudioFeatures {
         reusableFeatures.rms = rms; reusableFeatures.peak = peak; reusableFeatures.onset = onset
         reusableFeatures.bass = bass; reusableFeatures.mid = mid; reusableFeatures.treble = treble
         reusableFeatures.signalPresent = signalPresent
+        reusableFeatures.beatSequence = beatSequence
+        reusableFeatures.beatStrength = beatStrength
+        reusableFeatures.beatTimestampNanos = if (signalPresent) lastBeatTimestampNanos.coerceAtLeast(0L) else 0L
+        reusableFeatures.tempoBpm = if (signalPresent) tempoBpm else 0f
+        reusableFeatures.tempoConfidence = if (signalPresent) tempoConfidence else 0f
         return reusableFeatures
     }
     private fun averageBands(start: Int, end: Int): Float { var sum = 0f; for (i in start until end) sum += bands[i]; return sum / (end - start) }
+    private fun takeTimestamp(sampleCount: Int): Long {
+        if (suppliedTimestampNanos >= 0L) {
+            val timestamp = suppliedTimestampNanos
+            suppliedTimestampNanos = -1L
+            return timestamp
+        }
+        return nextTimestamp(sampleCount)
+    }
+    private fun nextTimestamp(sampleCount: Int): Long {
+        analysisTimestampNanos += sampleCount.coerceAtLeast(0) * NANOS_PER_SECOND / SAMPLE_RATE.toLong()
+        return analysisTimestampNanos
+    }
+    /** Accepts only positive bass/percussive energy novelty; tempo only validates accepted PCM events. */
+    private fun updateBeat(bass: Float, mid: Float, level: Float, signalPresent: Boolean, requestedThreshold: Float, timestamp: Long) {
+        if (!signalPresent) { resetBeatState(clearSequence = false); return }
+        val energy = (bass * .72f + mid * .20f + level * .08f).coerceIn(0f, 1f)
+        val novelty = (energy - previousBeatEnergy).coerceAtLeast(0f)
+        previousBeatEnergy = energy
+        val control = requestedThreshold.coerceIn(.05f, .95f)
+        val threshold = (MIN_BEAT_NOVELTY + control * BEAT_CONTROL_RANGE + beatNoveltyBaseline * (BEAT_BASELINE_MULTIPLIER + control)).coerceIn(MIN_BEAT_NOVELTY, .95f)
+        val interval = if (lastBeatTimestampNanos == Long.MIN_VALUE) Long.MAX_VALUE else timestamp - lastBeatTimestampNanos
+        val outsideRefractory = interval >= BEAT_REFRACTORY_NANOS
+        if (novelty >= threshold && outsideRefractory) {
+            beatSequence++
+            beatStrength = (novelty / threshold).coerceIn(0f, 1f)
+            if (lastBeatTimestampNanos != Long.MIN_VALUE && interval in MIN_TEMPO_INTERVAL_NANOS..MAX_TEMPO_INTERVAL_NANOS) recordBeatInterval(interval)
+            lastBeatTimestampNanos = timestamp
+        }
+        beatNoveltyBaseline += (novelty - beatNoveltyBaseline) * if (novelty > beatNoveltyBaseline) BEAT_BASELINE_ATTACK else BEAT_BASELINE_RELEASE
+        beatNoveltyBaseline = beatNoveltyBaseline.coerceIn(0f, 1f)
+    }
+    private fun recordBeatInterval(interval: Long) {
+        beatIntervalsNanos[beatIntervalCursor] = interval
+        beatIntervalCursor = (beatIntervalCursor + 1) % BEAT_HISTORY_SIZE
+        beatIntervalCount = (beatIntervalCount + 1).coerceAtMost(BEAT_HISTORY_SIZE)
+        var sum = 0L
+        for (index in 0 until beatIntervalCount) sum += beatIntervalsNanos[index]
+        val mean = sum.toDouble() / beatIntervalCount
+        var deviation = 0.0
+        for (index in 0 until beatIntervalCount) deviation += kotlin.math.abs(beatIntervalsNanos[index] - mean)
+        tempoBpm = (60_000_000_000.0 / mean).toFloat().coerceIn(0f, 300f)
+        tempoConfidence = (beatIntervalCount.toFloat() / BEAT_HISTORY_SIZE * (1.0 - deviation / beatIntervalCount / mean).coerceIn(0.0, 1.0)).toFloat()
+    }
+    private fun resetBeatState(clearSequence: Boolean) {
+        beatIntervalsNanos.fill(0L); beatIntervalCount = 0; beatIntervalCursor = 0
+        beatNoveltyBaseline = 0f; previousBeatEnergy = 0f; lastBeatTimestampNanos = Long.MIN_VALUE
+        beatStrength = 0f; tempoBpm = 0f; tempoConfidence = 0f
+        if (clearSequence) beatSequence = 0L
+    }
     /** The capture path is fixed at 1024 samples; alternate callers grow this only when needed. */
     private fun prepareWindow(count: Int) {
         if (count == windowCount) return
@@ -194,6 +286,12 @@ class PcmAnalyzer {
         const val BAND_ATTACK = .42f; const val BAND_RELEASE = .09f; const val SILENCE_EPSILON = .0001f
         const val MIN_ONSET_THRESHOLD = .08f; const val ONSET_THRESHOLD_MULTIPLIER = 1.7f
         const val ONSET_BASELINE_ATTACK = .15f; const val ONSET_BASELINE_RELEASE = .05f; const val ONSET_REFRACTORY_FRAMES = 3
+        const val NANOS_PER_SECOND = 1_000_000_000L
+        const val BEAT_HISTORY_SIZE = 8
+        const val BEAT_REFRACTORY_NANOS = 180_000_000L
+        const val MIN_TEMPO_INTERVAL_NANOS = 250_000_000L; const val MAX_TEMPO_INTERVAL_NANOS = 1_500_000_000L
+        const val MIN_BEAT_NOVELTY = .025f; const val BEAT_CONTROL_RANGE = .12f; const val BEAT_BASELINE_MULTIPLIER = 1.35f
+        const val BEAT_BASELINE_ATTACK = .08f; const val BEAT_BASELINE_RELEASE = .025f
         val MEL_FREQUENCIES = doubleArrayOf(55.0, 80.0, 115.0, 165.0, 235.0, 335.0, 475.0, 675.0, 960.0, 1360.0, 1930.0, 2740.0, 3890.0, 5520.0, 7830.0, 11_100.0)
     }
 }

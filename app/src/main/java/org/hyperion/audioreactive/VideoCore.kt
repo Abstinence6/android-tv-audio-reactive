@@ -9,6 +9,11 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     val video = ByteArray(width * height * 3)
     val composite = ByteArray(video.size)
     private var blackFrames = 0
+    private var activeVideoAudioEffect: VideoAudioEffect? = null
+    private var beatPulseAudioActive = false
+    private var lastConsumedBeatSequence = 0L
+    private var beatPulse = 0f
+    private var lastPulseTimestampNanos = 0L
 
     fun copyImage(image: Image): Boolean {
         val plane = image.planes[0]; val data = plane.buffer; val rowStride = plane.rowStride; val pixelStride = plane.pixelStride
@@ -27,8 +32,9 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         return blackFrames < BLACK_FRAME_HOLD
     }
 
-    fun compose(features: AudioFeatures?, settings: AudioSettings): ByteArray {
+    fun compose(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long = System.nanoTime()): ByteArray {
         val hasAudioAccent = features?.signalPresent == true && settings.renderMode == RenderMode.VIDEO_AUDIO
+        updateBeatPulse(features, settings, timestampNanos, hasAudioAccent)
         var p = 0; var zone = 0
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
@@ -59,6 +65,49 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         return composite
     }
 
+    /**
+     * Beat events are consumed once. Entering audio-active Beat Pulse baselines the retained analyzer
+     * event before rendering, so effect/mode activation cannot replay it. A 500 ms monotonic age bound
+     * covers a 200 ms 5 FPS frame interval, a 21 ms captured block, and render scheduling while
+     * rejecting stalled retained events.
+     */
+    private fun updateBeatPulse(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long, hasAudioAccent: Boolean) {
+        val audioActive = hasAudioAccent && settings.videoAudioEffect == VideoAudioEffect.BEAT_PULSE
+        if (activeVideoAudioEffect != settings.videoAudioEffect) {
+            activeVideoAudioEffect = settings.videoAudioEffect
+            beatPulse = 0f
+            lastPulseTimestampNanos = timestampNanos
+        }
+        if (audioActive && !beatPulseAudioActive) {
+            beatPulseAudioActive = true
+            beatPulse = 0f
+            lastPulseTimestampNanos = timestampNanos
+            lastConsumedBeatSequence = features?.beatSequence ?: lastConsumedBeatSequence
+            return
+        }
+        if (!audioActive) {
+            beatPulseAudioActive = false
+            beatPulse = 0f
+            lastPulseTimestampNanos = timestampNanos
+            return
+        }
+        val now = timestampNanos.coerceAtLeast(lastPulseTimestampNanos)
+        val elapsed = now - lastPulseTimestampNanos
+        if (elapsed > 0L) {
+            val tempoDecay = if (features!!.tempoConfidence >= .25f && features.tempoBpm > 0f) (60_000f / features.tempoBpm).coerceIn(180f, 900f) else DEFAULT_PULSE_DECAY_MILLIS
+            beatPulse *= kotlin.math.exp(-elapsed.toDouble() / (tempoDecay * 1_000_000.0)).toFloat()
+        }
+        lastPulseTimestampNanos = now
+        val sequence = features!!.beatSequence
+        if (sequence > lastConsumedBeatSequence) {
+            lastConsumedBeatSequence = sequence
+            val ageNanos = now - features.beatTimestampNanos
+            if (features.beatTimestampNanos > 0L && ageNanos in 0L..MAX_BEAT_EVENT_AGE_NANOS) {
+                beatPulse = max(beatPulse, (MIN_PULSE_ATTACK + features.beatStrength * PULSE_STRENGTH_RANGE).coerceIn(0f, 1f))
+            }
+        }
+        beatPulse = beatPulse.coerceIn(0f, 1f)
+    }
 
     /** Audio only applies a non-negative brightness accent; it never replaces source hue/chroma. */
     private fun videoAudioGain(f: AudioFeatures?, effect: VideoAudioEffect, zone: Int): Float {
@@ -66,7 +115,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         val band = f.bands[zone % AudioFeatures.BAND_COUNT]
         return when (effect) {
             VideoAudioEffect.BRIGHTNESS_PULSE -> f.rms
-            VideoAudioEffect.BEAT_PULSE -> max(f.rms, f.onset)
+            VideoAudioEffect.BEAT_PULSE -> beatPulse
             VideoAudioEffect.EQ -> band
             VideoAudioEffect.COMET -> if (zone % 16 == ((f.onset * 15).toInt())) max(f.onset, .15f) else f.rms * .18f
             VideoAudioEffect.RIPPLE -> max(0f, f.onset - abs((zone % 16) - 8) / 16f)
@@ -74,7 +123,13 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         }.coerceIn(0f, 1f)
     }
 
-    companion object { const val BLACK_FRAME_HOLD = 30 }
+    companion object {
+        const val BLACK_FRAME_HOLD = 30
+        const val MIN_PULSE_ATTACK = .22f
+        const val PULSE_STRENGTH_RANGE = .78f
+        const val DEFAULT_PULSE_DECAY_MILLIS = 420f
+        const val MAX_BEAT_EVENT_AGE_NANOS = 500_000_000L
+    }
 }
 
 

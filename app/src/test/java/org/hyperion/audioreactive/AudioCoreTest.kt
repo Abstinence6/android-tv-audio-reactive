@@ -213,6 +213,69 @@ class AudioCoreTest {
         assertTrue(added.map { EffectRenderer.renderImage(it, typicalFeatures, .8f, 99).toList() }.toSet().size >= 8)
     }
 
+    @Test fun periodicBassPercussionAccepts120BpmAndBuildsBoundedTempoConfidence() {
+        val analyzer = PcmAnalyzer()
+        var timestamp = 0L
+        var sequence = 0L
+        var bpm = 0f
+        var confidence = 0f
+        repeat(90) { block ->
+            timestamp += 50_000_000L
+            val hit = block % 10 == 0
+            val features = analyzer.analyze(tone(80.0, if (hit) 28_000 else 3_000), 1_024, 1f, .2f, timestamp)
+            if (features.beatSequence > sequence) sequence = features.beatSequence
+            bpm = features.tempoBpm; confidence = features.tempoConfidence
+        }
+        assertTrue("accepted=$sequence", sequence >= 5L)
+        assertTrue("bpm=$bpm", bpm in 112f..128f)
+        assertTrue("confidence=$confidence", confidence >= .5f && confidence <= 1f)
+    }
+
+    @Test fun beatThresholdAdaptsToLoudnessAndRejectsSteadyNoiseAndSlowRises() {
+        fun beats(amplitude: Int, threshold: Float, rising: Boolean = false, steady: Boolean = false): Long {
+            val analyzer = PcmAnalyzer(); var time = 0L; var sequence = 0L
+            repeat(80) { block ->
+                time += 50_000_000L
+                val level = when {
+                    rising -> (1_000 + block * 180).coerceAtMost(amplitude)
+                    steady -> amplitude
+                    block % 10 == 0 -> amplitude
+                    else -> amplitude / 9
+                }
+                sequence = analyzer.analyze(tone(80.0, level), 1_024, 1f, threshold, time).beatSequence
+            }
+            return sequence
+        }
+        assertTrue("low loudness should still detect", beats(14_000, .2f) >= 4L)
+        assertTrue("high loudness should still detect", beats(28_000, .2f) >= 4L)
+        assertTrue("steady signal is not a beat train", beats(16_000, .2f, steady = true) <= 1L)
+        assertTrue("slow rise is not a beat train", beats(18_000, .2f, rising = true) <= 1L)
+    }
+
+    @Test fun deterministicNoiseDoesNotCreateBeatEvents() {
+        val analyzer = PcmAnalyzer(); var state = 0x12345678; var timestamp = 0L; var sequence = 0L
+        repeat(80) {
+            val noise = ShortArray(1_024) {
+                state = state * 1103515245 + 12345
+                ((state ushr 16) % 1_600 - 800).toShort()
+            }
+            timestamp += 50_000_000L
+            sequence = analyzer.analyze(noise, 1_024, 1f, .2f, timestamp).beatSequence
+        }
+        assertTrue("bounded low-level noise is not a beat train: $sequence", sequence <= 1L)
+    }
+
+    @Test fun beatMetadataResetsOnSilenceWithoutSynthesizingASecondEvent() {
+        val analyzer = PcmAnalyzer()
+        val hit = analyzer.analyze(tone(80.0, 28_000), 1_024, 1f, .2f, 100_000_000L)
+        val sequence = hit.beatSequence
+        repeat(4) { index ->
+            val silence = analyzer.analyze(ShortArray(1_024), 1_024, 1f, .2f, 200_000_000L + index * 50_000_000L)
+            assertFalse(silence.signalPresent); assertEquals(0f, silence.beatStrength); assertEquals(0L, silence.beatTimestampNanos)
+            assertEquals(sequence, silence.beatSequence)
+        }
+    }
+
     private fun pixels(frame: ByteArray): List<List<Int>> = (0 until frame.size step 3).map { listOf(frame[it].toInt() and 255, frame[it + 1].toInt() and 255, frame[it + 2].toInt() and 255) }
 
     @Test fun silenceAndDcAreNoiseGatedAfterDcRemoval() {

@@ -187,6 +187,66 @@ class VideoModePolicyTest {
         assertFalse(TvUiStatePolicy.showVideoSaturation(RenderMode.AUDIO)); assertTrue(TvUiStatePolicy.showVideoSaturation(RenderMode.VIDEO)); assertTrue(TvUiStatePolicy.showVideoSaturation(RenderMode.VIDEO_AUDIO))
     }
 
+    @Test fun switchingIntoBeatPulseBaselinesRetainedBeatUntilTheNextSequence() {
+        val processor = processorWith(100, 50, 25)
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .5f)
+        val otherEffect = base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE)
+        val beatPulse = base.copy(videoAudioEffect = VideoAudioEffect.BEAT_PULSE)
+        val retained = AudioFeatures(.8f, .9f, .8f, .8f, .3f, .2f, FloatArray(16) { .5f }, true, 7L, 1f, 1_000_000_000L, 120f, 1f)
+        processor.compose(retained, otherEffect, 1_000_000_000L)
+        val noStaleAttack = processor.compose(retained, beatPulse, 1_100_000_000L).copyOf()
+        assertArrayEquals(byteArrayOf(100, 50, 25), noStaleAttack)
+        val next = AudioFeatures(.8f, .9f, .8f, .8f, .3f, .2f, FloatArray(16) { .5f }, true, 8L, 1f, 1_200_000_000L, 120f, 1f)
+        val oneNewAttack = processor.compose(next, beatPulse, 1_200_000_000L).copyOf()
+        val repeated = processor.compose(next, beatPulse, 1_200_000_000L).copyOf()
+        assertFalse(oneNewAttack.contentEquals(noStaleAttack))
+        assertArrayEquals("only the higher sequence may attack", oneNewAttack, repeated)
+    }
+
+    @Test fun initialBeatPulseActivationBaselinesRetainedEventThenAttacksOneNewSequence() {
+        val processor = processorWith(100, 50, 25)
+        val settings = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .5f, videoAudioEffect = VideoAudioEffect.BEAT_PULSE)
+        val retained = beat(sequence = 7L, timestampNanos = 1_000_000_000L)
+        val noStaleAttack = processor.compose(retained, settings, 1_100_000_000L).copyOf()
+        assertArrayEquals(byteArrayOf(100, 50, 25), noStaleAttack)
+        val next = beat(sequence = 8L, timestampNanos = 1_200_000_000L)
+        val attack = processor.compose(next, settings, 1_200_000_000L).copyOf()
+        val repeated = processor.compose(next, settings, 1_200_000_000L).copyOf()
+        val decay = processor.compose(next, settings, 1_500_000_000L).copyOf()
+        assertFalse(attack.contentEquals(noStaleAttack))
+        assertArrayEquals("only the higher sequence may attack", attack, repeated)
+        assertTrue((decay[0].toInt() and 255) < (attack[0].toInt() and 255))
+        assertTrue(attack.all { (it.toInt() and 255) in 0..255 })
+    }
+
+    @Test fun videoToVideoAudioBeatPulseBaselinesRetainedEventThenAttacksOneNewSequence() {
+        val processor = processorWith(100, 50, 25)
+        val video = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO, brightness = 1f, audioBoost = .5f, videoAudioEffect = VideoAudioEffect.BEAT_PULSE)
+        val videoAudio = video.copy(renderMode = RenderMode.VIDEO_AUDIO)
+        val retained = beat(sequence = 7L, timestampNanos = 1_000_000_000L)
+        processor.compose(retained, video, 1_000_000_000L)
+        val noStaleAttack = processor.compose(retained, videoAudio, 1_100_000_000L).copyOf()
+        assertArrayEquals(byteArrayOf(100, 50, 25), noStaleAttack)
+        val next = beat(sequence = 8L, timestampNanos = 1_200_000_000L)
+        val attack = processor.compose(next, videoAudio, 1_200_000_000L).copyOf()
+        val repeated = processor.compose(next, videoAudio, 1_200_000_000L).copyOf()
+        assertFalse(attack.contentEquals(noStaleAttack))
+        assertArrayEquals("only the higher sequence may attack", attack, repeated)
+    }
+
+    @Test fun beatPulseRejectsAnAgedHigherSequence() {
+        val processor = processorWith(100, 50, 25)
+        val settings = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .5f, videoAudioEffect = VideoAudioEffect.BEAT_PULSE)
+        processor.compose(beat(sequence = 7L, timestampNanos = 1_000_000_000L), settings, 1_000_000_000L)
+        val aged = beat(sequence = 8L, timestampNanos = 1_000_000_000L)
+        val rejected = processor.compose(aged, settings, 1_500_000_001L).copyOf()
+        val repeated = processor.compose(aged, settings, 1_500_000_001L).copyOf()
+        assertArrayEquals(byteArrayOf(100, 50, 25), rejected)
+        assertArrayEquals("aged event is consumed without an attack", rejected, repeated)
+    }
+
+    private fun beat(sequence: Long, timestampNanos: Long) = AudioFeatures(.8f, .9f, .8f, .8f, .3f, .2f, FloatArray(16) { .5f }, true, sequence, 1f, timestampNanos, 120f, 1f)
+
     private fun processorWith(r: Int, g: Int, b: Int): VideoFrameProcessor = VideoFrameProcessor(1, 1).also { processor ->
         val field = VideoFrameProcessor::class.java.getDeclaredField("video").apply { isAccessible = true }
         byteArrayOf(r.toByte(), g.toByte(), b.toByte()).copyInto(field.get(processor) as ByteArray)
