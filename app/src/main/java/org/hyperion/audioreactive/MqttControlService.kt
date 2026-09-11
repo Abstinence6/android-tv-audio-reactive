@@ -132,12 +132,16 @@ class MqttControlService : Service(), MqttCallbackExtended {
 
     private fun publishSnapshot(detail: String = if (AudioReactiveService.exists()) "capture_active" else "needs_media_projection_consent") {
         val c = client ?: return
+        val local = LocalStatusStore.snapshot()
         val runtime = MqttContract.DiagnosticRuntime(
             captureActive = AudioReactiveService.exists(),
             captureStatus = AudioReactiveService.captureStatus().name,
             detail = detail,
             appVersion = BuildConfig.VERSION_NAME,
             deviceName = listOf(Build.MANUFACTURER, Build.MODEL).filter(String::isNotBlank).joinToString(" ").ifBlank { "unknown" },
+            frameTimeMs = local.frameTimeMs,
+            worstFrameTimeMs = local.worstFrameTimeMs,
+            missedFrameDeadlines = local.missedFrameDeadlines,
         )
         val effective = EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), runtime.captureActive)
         MqttContract.snapshot(effective, runtime).forEach { p ->

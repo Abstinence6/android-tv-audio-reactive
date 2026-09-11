@@ -29,6 +29,9 @@ object MqttContract {
         val detail: String,
         val appVersion: String = "unknown",
         val deviceName: String = "unknown",
+        val frameTimeMs: Float = 0f,
+        val worstFrameTimeMs: Float = 0f,
+        val missedFrameDeadlines: Long = 0,
     )
     sealed interface Command { data object On : Command; data object Off : Command; data class SetEffect(val value: String) : Command; data class SetSetting(val field: String, val value: String) : Command }
 
@@ -148,6 +151,9 @@ object MqttContract {
             "capture_detail" to jsonString(runtime.detail.take(160)),
             "app_version" to jsonString(runtime.appVersion),
             "device_name" to jsonString(runtime.deviceName),
+            "frame_time_ms" to runtime.frameTimeMs.coerceIn(0f, 10_000f).toString(),
+            "worst_frame_time_ms" to runtime.worstFrameTimeMs.coerceIn(0f, 10_000f).toString(),
+            "missed_frame_deadlines" to runtime.missedFrameDeadlines.coerceAtLeast(0L).toString(),
             "render_mode" to jsonString(settings.renderMode.name),
             "output_mode" to jsonString(settings.outputMode.name),
             "effect" to jsonString(settings.effect.name),
