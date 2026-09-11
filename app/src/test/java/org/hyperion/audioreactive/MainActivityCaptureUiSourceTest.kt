@@ -21,12 +21,10 @@ class MainActivityCaptureUiSourceTest {
         assertFalse(source.contains("recoveryButton"))
     }
 
-    @Test fun primaryScreenUsesCompactIndicatorAndMovesMaintenanceActionsToAdditionalTab() {
+    @Test fun singleScreenUsesCompactIndicatorAndIncludesMaintenanceActions() {
         assertTrue(source.contains("captureIndicator.text = CaptureUiPresentation.indicator"))
         assertTrue(source.contains("text = \"Тест екрана:"))
-        val primary = source.substringAfter("private fun buildControlTab").substringBefore("private fun buildAdditionalTools")
-        assertFalse(primary.contains("Детальний локальний стан"))
-        assertFalse(primary.contains("Перевірити оновлення"))
+        assertTrue(source.contains("buildAdditionalTools(mainPanel)"))
         val additional = source.substringAfter("private fun buildAdditionalTools").substringBefore("private fun addEffectSelector")
         assertTrue(additional.contains("Детальний локальний стан"))
         assertTrue(additional.contains("Перевірити оновлення"))

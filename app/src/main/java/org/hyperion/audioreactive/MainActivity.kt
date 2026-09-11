@@ -28,7 +28,6 @@ import android.text.InputType
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.Color
 import android.graphics.Canvas
@@ -254,9 +253,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var videoSaturationRow: LinearLayout
     private lateinit var zonesRow: LinearLayout
     private lateinit var discoverButton: Button
-    private lateinit var controlTab: TextView
-    private lateinit var additionalTab: TextView
-    private val tabPanels = mutableListOf<View>()
+
     private val modeMutableRows = mutableListOf<View>()
     private lateinit var releaseUpdater: GitHubReleaseUpdater
 
@@ -305,40 +302,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         status = TextView(this).apply { textSize = 15f; maxLines = 2 }
         root.addView(status)
 
-        val tabLayoutContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controlTab = tabView(LeanbackTabPolicy.tabs[0]) { showTab(0) }
-        additionalTab = tabView(LeanbackTabPolicy.tabs[1]) { showTab(1) }
-        tabBar.addView(controlTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        tabBar.addView(additionalTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        tabLayoutContainer.addView(tabBar)
-        val controlPanel = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
-        val configurationPanel = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
-        fun scrollablePanel(panel: LinearLayout) = ScrollView(this).apply {
+        val mainPanel = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
+        val mainScroll = ScrollView(this).apply {
             id = View.generateViewId()
             isFillViewport = true
             descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-            addView(panel, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(mainPanel, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
-        val controlScroll = scrollablePanel(controlPanel)
-        val configurationScroll = scrollablePanel(configurationPanel)
-        tabPanels += listOf(controlScroll, configurationScroll)
-        tabPanels.forEach { panel ->
-            tabLayoutContainer.addView(panel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        }
-        root.addView(tabLayoutContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        buildControlTab(controlPanel)
-        buildModesTab(configurationPanel)
-        buildOutputsTab(configurationPanel)
-        buildAdditionalTools(configurationPanel)
+        root.addView(mainScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        buildControlTab(mainPanel)
+        buildModesTab(mainPanel)
+        buildOutputsTab(mainPanel)
+        buildAdditionalTools(mainPanel)
         setContentView(root)
-        controlTab.nextFocusDownId = captureButton.id
-        additionalTab.nextFocusDownId = qualityRow.getChildAt(1).id
-        controlTab.nextFocusLeftId = controlTab.id
-        controlTab.nextFocusRightId = additionalTab.id
-        additionalTab.nextFocusLeftId = controlTab.id
-        additionalTab.nextFocusRightId = additionalTab.id
-        showTab(0)
         refreshCaptureUi()
         captureButton.requestFocus()
         releaseUpdater = GitHubReleaseUpdater(
@@ -362,38 +338,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         handleRemoteAction(intent)
     }
 
-    /** Uses two ordinary focusable text tabs instead of theme-dependent tab indicators. */
-    private fun showTab(requested: Int) {
-        val selected = TvTabSelectionPolicy.selectedIndex(requested)
-        tabPanels.forEachIndexed { index, panel -> panel.visibility = if (index == selected) View.VISIBLE else View.GONE }
-        controlTab.isSelected = selected == 0
-        additionalTab.isSelected = selected == 1
-    }
-
-    private fun tabView(label: String, onClick: () -> Unit) = TextView(this).apply {
-        id = View.generateViewId()
-        text = label
-        textSize = 18f
-        gravity = Gravity.CENTER
-        isFocusable = true
-        isClickable = true
-        setPadding(24, 16, 24, 16)
-        background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_selected, android.R.attr.state_focused), tabBackground(Color.rgb(42, 105, 170), Color.WHITE))
-            addState(intArrayOf(android.R.attr.state_focused), tabBackground(Color.rgb(55, 55, 55), Color.WHITE))
-            addState(intArrayOf(android.R.attr.state_selected), tabBackground(Color.rgb(42, 105, 170), Color.rgb(150, 210, 255)))
-            addState(intArrayOf(), tabBackground(Color.TRANSPARENT, Color.DKGRAY))
-        }
-        setOnClickListener { onClick() }
-    }
-
-    private fun tabBackground(fill: Int, stroke: Int) = GradientDrawable().apply {
-        setColor(fill)
-        setStroke(2, stroke)
-        cornerRadius = 10f
-    }
-
-    /** The first interactive control in the first tab remains the capture toggle. */
+    /** The first interactive control in the single scrollable D-pad screen is capture. */
     private fun buildControlTab(panel: LinearLayout) {
         captureButton = Button(this).apply { id = View.generateViewId(); setOnClickListener { handleCaptureToggle() } }
         panel.addView(captureButton)
@@ -414,7 +359,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         panel.addView(testButton)
     }
 
-    /** Technical and maintenance actions live in the Additional tab, away from primary capture controls. */
+    /** Technical and maintenance actions follow capture and output controls on the same scrollable screen. */
     private fun buildAdditionalTools(panel: LinearLayout) {
         panel.addView(TextView(this).apply { text = "Додатково"; textSize = 18f })
         panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })

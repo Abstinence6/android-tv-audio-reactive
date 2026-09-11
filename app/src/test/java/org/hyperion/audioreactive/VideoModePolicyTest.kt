@@ -173,13 +173,6 @@ class VideoModePolicyTest {
         } finally { LiveRendererSettings.end() }
     }
 
-    @Test fun tabsAreFixedDpadButtonPanelsWithExactlyOneVisible() {
-        assertEquals(listOf("Керування", "Додатково"), LeanbackTabPolicy.tabs)
-        assertEquals("toggle", LeanbackTabPolicy.controls(0).first())
-        assertTrue("base-video-colour-treatment" in LeanbackTabPolicy.controls(1))
-        assertTrue("video-saturation" in LeanbackTabPolicy.controls(1))
-        (0..1).forEach { selected -> assertEquals(1, (0..1).count { panel -> TvTabSelectionPolicy.panelIsVisible(panel, selected) }) }
-    }
 
     @Test fun conditionalTvControlsFollowCanonicalMode() {
         assertFalse(TvUiStatePolicy.showVideoControls(RenderMode.AUDIO)); assertTrue(TvUiStatePolicy.showVideoControls(RenderMode.VIDEO))

@@ -68,14 +68,6 @@ class ApprovedFeatureBatchTest {
         assertFalse(LiveRendererControlPolicy.sliderMutable("Зони джерела WLED"))
     }
 
-    @Test fun twoRealTabsKeepPrimaryCaptureControlsAndExactlyOnePanelVisible() {
-        assertEquals(listOf("Керування", "Додатково"), LeanbackTabPolicy.tabs)
-        assertEquals("toggle", LeanbackTabPolicy.controls(0).first())
-        assertTrue("capture-mode" in LeanbackTabPolicy.controls(0))
-        assertTrue("compatible-effects" in LeanbackTabPolicy.controls(0))
-        assertTrue("live-effect-controls" in LeanbackTabPolicy.controls(1))
-        (0..1).forEach { selected -> assertEquals(1, (0..1).count { TvTabSelectionPolicy.panelIsVisible(it, selected) }) }
-    }
 
     @Test fun edgeEditsAreIndependentAndSaveRequiresExplicitRemainingZero() {
         val c = WledScreenCalibration.proportional("mac:001122334455", 8)
