@@ -161,8 +161,8 @@ object LeanbackTabPolicy {
     /** Exactly two fixed Ukrainian D-pad tabs. */
     val tabs = listOf("Керування", "Додатково")
     fun controls(tab: Int) = when (tab) {
-        0 -> listOf("toggle", "capture-mode", "compatible-effects", "rainbow-visual-source")
-        1 -> listOf("source-video-quality", "shared-fps", "base-video-colour-treatment", "video-saturation", "live-effect-controls", "outputs", "discovery", "wled-source-zones", "calibration")
+        0 -> listOf("toggle", "route-recovery", "capture-mode", "compatible-effects", "rainbow-visual-source")
+        1 -> listOf("source-video-quality", "shared-fps", "base-video-colour-treatment", "video-saturation", "live-effect-controls", "outputs", "discovery", "wled-source-zones", "calibration", "local-status", "updates")
         else -> emptyList()
     }
 }

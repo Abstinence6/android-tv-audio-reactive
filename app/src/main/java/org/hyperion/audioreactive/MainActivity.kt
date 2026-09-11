@@ -50,6 +50,29 @@ object OutputUiPolicy {
     fun handlesCheckboxChange(synchronizing: Boolean) = !synchronizing
 }
 
+/** Short, stable TV-facing summary; detailed diagnostics stay behind the local status action. */
+object CaptureUiPresentation {
+    fun indicator(status: CaptureStatus, mode: RenderMode): String =
+        "Захоплення: ${stateLabel(status)} · Режим: ${modeLabel(mode)}"
+
+    private fun stateLabel(status: CaptureStatus) = when (status) {
+        CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT -> "Готово"
+        CaptureStatus.PREPARING_PROJECTION, CaptureStatus.PREPARING_AUDIO_RECORD -> "Підготовка"
+        CaptureStatus.ROUTE_LOST -> "Вихід втрачено"
+        CaptureStatus.ROUTER_INIT_FAILED, CaptureStatus.AUDIO_RECORD_INIT_FAILED,
+        CaptureStatus.AUDIO_RECORD_START_FAILED, CaptureStatus.AUDIO_RECORD_INIT_TIMEOUT -> "Помилка запуску"
+        CaptureStatus.VIDEO_UNAVAILABLE_OR_PROTECTED -> "Відео недоступне"
+        CaptureStatus.CAPTURE_ACTIVE, CaptureStatus.CAPTURE_ACTIVE_AUDIO,
+        CaptureStatus.CAPTURE_ACTIVE_VIDEO, CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO -> "Активне"
+    }
+
+    private fun modeLabel(mode: RenderMode) = when (mode) {
+        RenderMode.AUDIO -> "Аудіо"
+        RenderMode.VIDEO -> "Відео"
+        RenderMode.VIDEO_AUDIO -> "Аудіо + відео"
+    }
+}
+
 /** Local-only visual patterns. The existing main-screen button cycles these without an output route. */
 enum class LocalVisualPattern(
     val label: String,
@@ -213,8 +236,10 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             rainbowHandler.postDelayed(this, 33L)
         }
     }
+    private lateinit var captureIndicator: TextView
     private lateinit var status: TextView
     private lateinit var captureButton: Button
+    private lateinit var recoveryButton: Button
     private lateinit var testButton: Button
     private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
@@ -276,11 +301,18 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }
         val root = contentRoot
         root.addView(TextView(this).apply { text = "Audio Reactive TV"; textSize = 26f })
-        status = TextView(this).apply {
-            text = "Очікування — захоплення потребує RECORD_AUDIO і підтвердження MediaProjection."
-            textSize = 18f
-        }
+        captureIndicator = TextView(this).apply { textSize = 19f }
+        root.addView(captureIndicator)
+        status = TextView(this).apply { textSize = 15f; maxLines = 2 }
         root.addView(status)
+        recoveryButton = Button(this).apply {
+            id = View.generateViewId()
+            text = "Повторно перевірити й увімкнути"
+            contentDescription = "Локально повторно перевірити вихід, потім запросити новий дозвіл захоплення"
+            setOnClickListener { handleCaptureToggle() }
+            visibility = View.GONE
+        }
+        root.addView(recoveryButton)
 
         val tabLayoutContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -307,6 +339,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         buildControlTab(controlPanel)
         buildModesTab(configurationPanel)
         buildOutputsTab(configurationPanel)
+        buildAdditionalTools(configurationPanel)
         setContentView(root)
         controlTab.nextFocusDownId = captureButton.id
         additionalTab.nextFocusDownId = qualityRow.getChildAt(1).id
@@ -383,14 +416,16 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         modeMutableRows += audioBox; modeMutableRows += videoBox
         addEffectSelector(panel)
         testButton = Button(this).apply {
-            text = "Тестове зображення: ${LocalVisualPattern.entries[localVisualPatternIndex].label}"
+            text = "Тест екрана: ${LocalVisualPattern.entries[localVisualPatternIndex].label}"
             contentDescription = "Повноекранне локальне тестове зображення; без захоплення, маршруту, сокета або виходу"
             setOnClickListener { cycleLocalVisualPattern() }
         }
         panel.addView(testButton)
-        panel.addView(TextView(this).apply {
-            text = "Кнопка циклічно перемикає локальні шаблони на повноекранному фоні й доступна під час захоплення. Не запускає MediaProjection, маршрути, сокети або мережевий вихід."
-        })
+    }
+
+    /** Technical and maintenance actions live in the Additional tab, away from primary capture controls. */
+    private fun buildAdditionalTools(panel: LinearLayout) {
+        panel.addView(TextView(this).apply { text = "Додатково"; textSize = 18f })
         panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })
         updateButton = Button(this).apply {
             text = "Перевірити оновлення"
@@ -657,7 +692,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         RainbowVisualSourcePolicy.start()
         rainbowHandler.removeCallbacks(rainbowAnimator)
         rainbowHandler.removeCallbacks(movingBarsAnimator)
-        testButton.text = "Тестове зображення: ${pattern.label}"
+        testButton.text = "Тест екрана: ${pattern.label}"
         status.text = "Локальний шаблон: ${pattern.label}. Мережевий вихід не використовується."
         if (pattern == LocalVisualPattern.RAINBOW) {
             rainbowAnimator.run()
@@ -820,9 +855,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     private fun refreshCaptureUi(updateStatus: Boolean = false) {
         val active = AudioReactiveService.exists()
+        val captureStatus = AudioReactiveService.captureStatus()
+        captureIndicator.text = CaptureUiPresentation.indicator(captureStatus, effectiveRenderSettings().renderMode)
         captureButton.text = if (active) OutputUiPolicy.DISABLE else OutputUiPolicy.ENABLE
         val locked = active || captureAdmissionLocked
         captureButton.isEnabled = !captureAdmissionLocked
+        val mayRecover = RouteRecoveryPolicy.decide(
+            RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON,
+            captureStatus,
+            active,
+            captureAdmissionLocked,
+        ) == RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION
+        recoveryButton.visibility = if (mayRecover) View.VISIBLE else View.GONE
+        recoveryButton.isEnabled = mayRecover
         // The local visual source is safe while capture owns a route.
         testButton.isEnabled = !captureAdmissionLocked
         modeMutableRows.forEach { control ->
@@ -834,7 +879,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         setChildrenEnabled(zonesRow, !locked)
         renderOutputUi()
         refreshConditionalControls()
-        if (updateStatus) status.text = AudioReactiveService.captureStatus().uiText
+        if (updateStatus) status.text = captureStatus.uiText
     }
 
     private fun setChildrenEnabled(row: LinearLayout, enabled: Boolean) {
