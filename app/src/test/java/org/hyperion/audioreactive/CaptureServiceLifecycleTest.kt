@@ -122,6 +122,17 @@ class CaptureServiceLifecycleTest {
         assertEquals(listOf("cleanup"), events)
     }
 
+    @Test fun firstTerminalCauseWinsAndLaterStopCannotOverwriteIt() {
+        val events = mutableListOf<String>()
+        val lifecycle = CaptureServiceLifecycle(cleanup = { events += "cleanup" })
+        assertTrue(lifecycle.beginStart { true })
+
+        assertTrue(lifecycle.stop { events += "route_lost" })
+        assertFalse(lifecycle.stop { events += "user_stop" })
+
+        assertEquals(listOf("route_lost", "cleanup"), events)
+    }
+
     @Test fun concurrentStartsAdmitExactlyOneRoute() {
         val reserves = AtomicInteger()
         val lifecycle = CaptureServiceLifecycle(cleanup = { })

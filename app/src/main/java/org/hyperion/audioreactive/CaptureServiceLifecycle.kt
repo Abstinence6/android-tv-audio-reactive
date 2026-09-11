@@ -59,9 +59,10 @@ internal class CaptureServiceLifecycle(
         true
     }
 
-    /** Linearizes cancellation, cleanup, and every startup action on the same monitor. */
-    fun stop(): Boolean = synchronized(monitor) {
+    /** Linearizes cancellation, terminal cause selection, cleanup, and every startup action. */
+    fun stop(beforeCleanup: () -> Unit = {}): Boolean = synchronized(monitor) {
         if (!teardownRequested.compareAndSet(false, true)) return false
+        beforeCleanup()
         onTeardownRequested()
         phase = Phase.STOPPING
         cleanup()

@@ -1,6 +1,6 @@
 package org.hyperion.audioreactive
 
-/** Exported MainActivity remote-action contract. Starts always re-enter the ordinary consent flow. */
+/** Exported MainActivity remote-action contract. Normal starts re-enter visible consent; route-loss retry is local-only. */
 object MainActivityActionPolicy {
     enum class Request { NONE, TOGGLE, ON, OFF }
     enum class Decision { NONE, STOP_APP_OWNED_SERVICE, REQUEST_VISIBLE_CAPTURE_FLOW }

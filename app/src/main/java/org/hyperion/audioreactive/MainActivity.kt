@@ -769,12 +769,27 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         refreshCaptureUi()
     }
 
-    /** Remote actions only enter the existing coordinator; they never carry capture consent. */
+    /** Remote actions only enter the ordinary visible consent flow; route-loss recovery stays local. */
     private fun handleRemoteAction(intent: Intent) {
         val request = MainActivityActionPolicy.parse(intent.action)
         when (MainActivityActionPolicy.decide(request, AudioReactiveService.exists())) {
             MainActivityActionPolicy.Decision.STOP_APP_OWNED_SERVICE -> stopExistingService()
-            MainActivityActionPolicy.Decision.REQUEST_VISIBLE_CAPTURE_FLOW -> captureToggleCoordinator.toggle()
+            MainActivityActionPolicy.Decision.REQUEST_VISIBLE_CAPTURE_FLOW -> when (
+                RouteRecoveryPolicy.decide(
+                    RouteRecoveryPolicy.Origin.REMOTE_ACTION,
+                    AudioReactiveService.captureStatus(),
+                    AudioReactiveService.exists(),
+                    captureAdmissionLocked,
+                )
+            ) {
+                RouteRecoveryPolicy.Decision.ORDINARY_FLOW -> captureToggleCoordinator.toggle()
+                RouteRecoveryPolicy.Decision.REQUIRE_LOCAL_BUTTON -> {
+                    status.text = "Вихід втрачено. Повторіть спробу локально кнопкою захоплення."
+                    captureButton.requestFocus()
+                }
+                RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION,
+                RouteRecoveryPolicy.Decision.IGNORE -> Unit
+            }
             MainActivityActionPolicy.Decision.NONE -> Unit
         }
     }
@@ -783,7 +798,25 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     override fun onResume() { super.onResume(); refreshCaptureUi(true) }
     override fun onStop() { unregisterReceiver(receiver); super.onStop() }
     override fun onDestroy() { invalidatePendingCaptureAdmission(); captureToggleCoordinator.invalidatePending(); rainbowHandler.removeCallbacks(rainbowAnimator); rainbowHandler.removeCallbacks(movingBarsAnimator); RainbowVisualSourcePolicy.stop(); releaseUpdater.close(); work.shutdownNow(); super.onDestroy() }
-    private fun handleCaptureToggle() { captureToggleCoordinator.toggle(); refreshCaptureUi() }
+    private fun handleCaptureToggle() {
+        val active = AudioReactiveService.exists()
+        if (active) {
+            captureToggleCoordinator.toggle()
+        } else when (
+            RouteRecoveryPolicy.decide(
+                RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON,
+                AudioReactiveService.captureStatus(),
+                serviceActive = false,
+                admissionPending = captureAdmissionLocked,
+            )
+        ) {
+            RouteRecoveryPolicy.Decision.ORDINARY_FLOW,
+            RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION -> captureToggleCoordinator.toggle()
+            RouteRecoveryPolicy.Decision.REQUIRE_LOCAL_BUTTON,
+            RouteRecoveryPolicy.Decision.IGNORE -> Unit
+        }
+        refreshCaptureUi()
+    }
 
     private fun refreshCaptureUi(updateStatus: Boolean = false) {
         val active = AudioReactiveService.exists()
