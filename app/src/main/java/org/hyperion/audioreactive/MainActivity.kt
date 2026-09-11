@@ -239,7 +239,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var captureIndicator: TextView
     private lateinit var status: TextView
     private lateinit var captureButton: Button
-    private lateinit var recoveryButton: Button
     private lateinit var testButton: Button
     private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
@@ -305,14 +304,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         root.addView(captureIndicator)
         status = TextView(this).apply { textSize = 15f; maxLines = 2 }
         root.addView(status)
-        recoveryButton = Button(this).apply {
-            id = View.generateViewId()
-            text = "Повторно перевірити й увімкнути"
-            contentDescription = "Локально повторно перевірити вихід, потім запросити новий дозвіл захоплення"
-            setOnClickListener { handleCaptureToggle() }
-            visibility = View.GONE
-        }
-        root.addView(recoveryButton)
 
         val tabLayoutContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val tabBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -857,17 +848,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val active = AudioReactiveService.exists()
         val captureStatus = AudioReactiveService.captureStatus()
         captureIndicator.text = CaptureUiPresentation.indicator(captureStatus, effectiveRenderSettings().renderMode)
-        captureButton.text = if (active) OutputUiPolicy.DISABLE else OutputUiPolicy.ENABLE
-        val locked = active || captureAdmissionLocked
-        captureButton.isEnabled = !captureAdmissionLocked
         val mayRecover = RouteRecoveryPolicy.decide(
             RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON,
             captureStatus,
             active,
             captureAdmissionLocked,
         ) == RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION
-        recoveryButton.visibility = if (mayRecover) View.VISIBLE else View.GONE
-        recoveryButton.isEnabled = mayRecover
+        captureButton.text = when {
+            active -> OutputUiPolicy.DISABLE
+            mayRecover -> "Повторно перевірити й увімкнути"
+            else -> OutputUiPolicy.ENABLE
+        }
+        val locked = active || captureAdmissionLocked
+        captureButton.isEnabled = !captureAdmissionLocked
         // The local visual source is safe while capture owns a route.
         testButton.isEnabled = !captureAdmissionLocked
         modeMutableRows.forEach { control ->

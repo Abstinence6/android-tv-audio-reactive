@@ -13,15 +13,12 @@ class MainActivityCaptureUiSourceTest {
         ).first(File::isFile).readText()
     }
 
-    @Test fun recoveryControlIsVisibleOnlyForAQualifiedLocalRouteLoss() {
-        assertTrue(source.contains("text = \"Повторно перевірити й увімкнути\""))
+    @Test fun captureControlBecomesTheOnlyRecoveryControlForAQualifiedLocalRouteLoss() {
         assertTrue(source.contains("RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON"))
         assertTrue(source.contains("RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION"))
-        assertTrue(source.contains("recoveryButton.visibility = if (mayRecover) View.VISIBLE else View.GONE"))
-        val recovery = source.substringAfter("recoveryButton = Button(this)").substringBefore("val tabLayoutContainer")
-        assertTrue(recovery.contains("setOnClickListener { handleCaptureToggle() }"))
-        assertFalse(recovery.contains("requestMediaProjectionConsent"))
-        assertFalse(recovery.contains("startCapture("))
+        assertTrue(source.contains("mayRecover -> \"Повторно перевірити й увімкнути\""))
+        assertTrue(source.contains("captureButton = Button(this).apply { id = View.generateViewId(); setOnClickListener { handleCaptureToggle() } }"))
+        assertFalse(source.contains("recoveryButton"))
     }
 
     @Test fun primaryScreenUsesCompactIndicatorAndMovesMaintenanceActionsToAdditionalTab() {
