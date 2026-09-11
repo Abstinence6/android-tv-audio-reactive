@@ -14,6 +14,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     private var lastConsumedBeatSequence = 0L
     private var beatPulse = 0f
     private var lastPulseTimestampNanos = 0L
+    private val silenceBrightness = SilenceBrightnessController()
 
     fun copyImage(image: Image): Boolean {
         val plane = image.planes[0]; val data = plane.buffer; val rowStride = plane.rowStride; val pixelStride = plane.pixelStride
@@ -39,7 +40,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
             val gain = if (hasAudioAccent) videoAudioGain(features, settings.videoAudioEffect, zone) else 0f
-            val brightness = VideoAudioSilenceBrightnessPolicy.composeBrightness(settings, features?.signalPresent) * (1f + settings.audioBoost * gain)
+            val brightness = silenceBrightness.compose(settings, features?.signalPresent, timestampNanos) * (1f + settings.audioBoost * gain)
             if (settings.renderMode != RenderMode.AUDIO) {
                 val saturation = settings.videoSaturationPercent.coerceIn(VideoSaturationPolicy.MIN_PERCENT, VideoSaturationPolicy.MAX_PERCENT) / 100f
                 val average = (r + g + b) / 3f

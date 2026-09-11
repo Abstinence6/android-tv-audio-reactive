@@ -467,6 +467,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         sliderRow("Мінімальна яскравість без звуку", (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, { SliderFormatters.brightness(it * .05f) }) {
             updateVideoAudioSilenceBrightnessFloor(it * .05f)
         }.also(panel::addView)
+        sliderRow("Затримка тиші", RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, { "${it * 100} мс" }) { updateSilenceHoldMillis(it * 100) }.also(panel::addView)
+        sliderRow("Плавність тиші", (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, { "${100 + it * 100} мс" }) { updateSilenceFadeMillis(100 + it * 100) }.also(panel::addView)
         panel.addView(TextView(this).apply { text = "Параметри ефекту" })
         videoColourTreatmentRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
         videoColourTreatmentRow.addView(TextView(this).apply { text = "Базова обробка кольору відео" })
@@ -539,6 +541,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             LiveRendererSettings.setVideoAudioSilenceBrightnessFloor(value.coerceIn(0f, live.brightness), live.brightness)
         } else RuntimeSettings.update { it.copy(videoAudioSilenceBrightnessFloor = value.coerceIn(0f, it.brightness)) }
     }
+    private fun updateSilenceHoldMillis(value: Int) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceHoldMillis(value) else RuntimeSettings.update { it.copy(silenceHoldMillis = value) } }
+    private fun updateSilenceFadeMillis(value: Int) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceFadeMillis(value) else RuntimeSettings.update { it.copy(silenceFadeMillis = value) } }
 
 
     private fun sliderRow(label: String, initial: Int, max: Int, format: (Int) -> String, apply: (Int) -> Unit): LinearLayout =

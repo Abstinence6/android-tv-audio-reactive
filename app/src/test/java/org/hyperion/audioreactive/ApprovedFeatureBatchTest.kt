@@ -62,7 +62,7 @@ class ApprovedFeatureBatchTest {
     }
 
     @Test fun onlyRendererLocalControlsAreLiveMutable() {
-        assertEquals(setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри"), LiveRendererControlPolicy.sliderLabels)
+        assertEquals(setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Затримка тиші", "Плавність тиші", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри"), LiveRendererControlPolicy.sliderLabels)
         assertTrue(LiveRendererControlPolicy.sliderMutable("Яскравість"))
         assertFalse(LiveRendererControlPolicy.sliderMutable("FPS (Аудіо / Відео / Аудіо+відео)"))
         assertFalse(LiveRendererControlPolicy.sliderMutable("Зони джерела WLED"))

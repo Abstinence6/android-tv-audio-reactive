@@ -64,14 +64,14 @@ class VideoModePolicyTest {
         assertTrue(output.all { it == 0.toByte() })
     }
 
-    @Test fun videoAudioSilenceFloorPreservesNonBlackVideoButZeroKeepsHistoricalBlackout() {
+    @Test fun videoAudioSilenceFloorPreservesNonBlackVideoAndHoldDefersZeroFloorBlackout() {
         val processor = processorWith(80, 40, 20)
         val silent = AudioFeatures(0f, 0f, 0f, 0f, 0f, 0f, FloatArray(AudioFeatures.BAND_COUNT), false)
         val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = .7f)
         val raw = processor.compose(silent, base.copy(videoAudioSilenceBrightnessFloor = .2f)).copyOf()
         assertTrue(raw.any { it != 0.toByte() })
         assertFalse(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = .2f), false))
-        assertTrue(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = 0f), false))
+        assertFalse(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = 0f), false))
         assertFalse(AudioSettings.defaults().copy(brightness = .4f, videoAudioSilenceBrightnessFloor = .45f).valid())
     }
 

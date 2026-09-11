@@ -10,9 +10,63 @@ object FrameSmoothingPolicy {
 
 /** A positive VIDEO_AUDIO floor changes only silence behavior; protected/black source handling remains terminal. */
 object VideoAudioSilenceBrightnessPolicy {
-    fun retainsVideo(settings: AudioSettings) = settings.renderMode == RenderMode.VIDEO_AUDIO && settings.videoAudioSilenceBrightnessFloor > 0f
-    fun composeBrightness(settings: AudioSettings, signalPresent: Boolean?) =
-        if (settings.renderMode == RenderMode.VIDEO_AUDIO && signalPresent == false) maxOf(settings.videoAudioSilenceBrightnessFloor, settings.brightness) else settings.brightness
+    fun retainsVideo(settings: AudioSettings) = settings.renderMode == RenderMode.VIDEO_AUDIO &&
+        (settings.videoAudioSilenceBrightnessFloor > 0f || settings.silenceHoldMillis > 0)
+}
+
+/** Fixed-state, timestamp-driven VIDEO_AUDIO silence transition with no render-time allocation. */
+class SilenceBrightnessController {
+    enum class State { ACTIVE, HOLDING, FADING, SILENT, RECOVERING }
+    private var state = State.ACTIVE
+    private var stateSinceNanos = 0L
+    private var brightnessAtTransition = 0f
+
+    fun currentState() = state
+
+    fun compose(settings: AudioSettings, signalPresent: Boolean?, timestampNanos: Long): Float {
+        if (settings.renderMode != RenderMode.VIDEO_AUDIO) {
+            reset(timestampNanos)
+            return settings.brightness
+        }
+        val now = timestampNanos.coerceAtLeast(stateSinceNanos)
+        if (signalPresent == true) {
+            if (state != State.ACTIVE) {
+                brightnessAtTransition = valueAt(settings, now)
+                state = State.RECOVERING
+                stateSinceNanos = now
+            }
+        } else if (signalPresent == false && state == State.ACTIVE) {
+            brightnessAtTransition = settings.brightness
+            state = State.HOLDING
+            stateSinceNanos = now
+        }
+        return valueAt(settings, now).also { value ->
+            if (state == State.HOLDING && now - stateSinceNanos >= settings.silenceHoldMillis * NANOS_PER_MILLI) {
+                brightnessAtTransition = settings.brightness
+                state = State.FADING
+                stateSinceNanos = now
+            } else if (state == State.FADING && value <= settings.videoAudioSilenceBrightnessFloor) {
+                state = State.SILENT
+            } else if (state == State.RECOVERING && value >= settings.brightness) {
+                state = State.ACTIVE
+            }
+        }
+    }
+
+    private fun valueAt(settings: AudioSettings, now: Long): Float = when (state) {
+        State.ACTIVE, State.HOLDING -> settings.brightness
+        State.SILENT -> settings.videoAudioSilenceBrightnessFloor
+        State.FADING -> interpolate(brightnessAtTransition, settings.videoAudioSilenceBrightnessFloor, now - stateSinceNanos, settings.silenceFadeMillis)
+        State.RECOVERING -> interpolate(brightnessAtTransition, settings.brightness, now - stateSinceNanos, settings.silenceFadeMillis)
+    }.coerceIn(0f, settings.brightness)
+
+    private fun interpolate(from: Float, to: Float, elapsedNanos: Long, durationMillis: Int): Float {
+        val fraction = (elapsedNanos.toDouble() / (durationMillis.coerceAtLeast(1) * NANOS_PER_MILLI)).coerceIn(0.0, 1.0).toFloat()
+        return from + (to - from) * fraction
+    }
+
+    private fun reset(timestampNanos: Long) { state = State.ACTIVE; stateSinceNanos = timestampNanos; brightnessAtTransition = 0f }
+    private companion object { const val NANOS_PER_MILLI = 1_000_000L }
 }
 
 /** `acquireLatestImage` plus a two-image reader bounds capture backlog to one obsolete image. */
