@@ -92,20 +92,21 @@ class GitHubReleaseUpdater(
     @Volatile private var activeConnection: HttpURLConnection? = null
     @Volatile private var selectedRelease: Release? = null
     @Volatile private var downloadedApk: File? = null
+    @Volatile private var awaitingInstallPermission = false
 
     /** Metadata only; it never downloads an APK or opens the installer. */
     fun checkForUpdate() {
         selectedRelease = null
         downloadedApk?.delete(); downloadedApk = null
-        publish("Перевіряю оновлення…", true)
+        awaitingInstallPermission = false
         executor.execute {
             val result = runCatching { findNewestRelease() }
             deliver {
                 result.fold(
                     { release ->
                         selectedRelease = release
-                        if (release == null) publish("Оновлень немає.", false)
-                        else { publish("Оновлення доступне. Виберіть «Оновити».", false); onUpdateAvailable() }
+                        if (release == null) publish("", false)
+                        else { publish("Оновлення доступне.", false); onUpdateAvailable() }
                     },
                     { publish("Не вдалося перевірити оновлення.", false) },
                 )
@@ -113,7 +114,7 @@ class GitHubReleaseUpdater(
         }
     }
 
-    /** Called only from the visible D-pad update control; it never silently installs. */
+    /** Called only after the visible launch-time confirmation; it never silently installs. */
     fun updateSelectedRelease() {
         val release = selectedRelease ?: run { publish("Спочатку перевірте оновлення.", false); return }
         val cached = downloadedApk
@@ -136,6 +137,15 @@ class GitHubReleaseUpdater(
         }
     }
 
+    /** Continue only the update that the user already confirmed before opening Unknown Sources settings. */
+    fun resumePendingInstall() {
+        if (!awaitingInstallPermission || !context.packageManager.canRequestPackageInstalls()) return
+        val release = selectedRelease ?: return
+        val apk = downloadedApk ?: return
+        awaitingInstallPermission = false
+        openVerifiedUpdate(apk, release.tag)
+    }
+
     /** Rechecks the retained archive immediately before opening Android's system installer. */
     private fun openVerifiedUpdate(apk: File, tag: String) {
         if (!verifyArchive(apk, tag)) {
@@ -144,8 +154,9 @@ class GitHubReleaseUpdater(
             return
         }
         if (!context.packageManager.canRequestPackageInstalls()) {
+            awaitingInstallPermission = true
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            publish("Дозвольте встановлення з цього застосунку. Оновлення перевірено й збережено; після дозволу виберіть «Оновити» ще раз.", false)
+            publish("Дозвольте встановлення з цього застосунку. Оновлення перевірено й збережено; після повернення відкриється системне підтвердження.", false)
             return
         }
         when (runCatching { openPackageInstaller(apk) }.getOrDefault(false)) {

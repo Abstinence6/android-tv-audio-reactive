@@ -4,7 +4,7 @@ Android TV app for user-approved playback capture. `MainActivity` is exported an
 
 ## UI and capture contract
 
-The D-pad UI uses one focusable, fill-viewport scroll screen (not `TabHost`, `TabWidget`, or a library tab widget). Capture is the first interactive control; capture-mode, compatible effect, route, output, diagnostics, and update controls follow in one D-pad-scrollable sequence. Only effect selection and its parameters remain live during capture; routes, output, quality, source zones, video saturation, calibration, and shared FPS lock.
+The D-pad UI uses one focusable, fill-viewport scroll screen (not `TabHost`, `TabWidget`, or a library tab widget). Capture is the first interactive control; capture-mode, compatible effect, route, output, and diagnostics follow in one D-pad-scrollable sequence. At launch, a newer signed release opens a visible Yes/No confirmation; only Yes downloads, verifies, and opens Android's system installer. No-update checks are silent. Only effect selection and its parameters remain live during capture; routes, output, quality, source zones, video saturation, calibration, and shared FPS lock.
 
 One 5–30 FPS setting applies to AUDIO, VIDEO, and VIDEO_AUDIO. Old `video_fps_v2` is read only as a migration fallback and is removed at the next save. VIDEO has Normal (baseline), Saturation (the inactive-only 0–200%, default 125% slider), and Contrast (midtone contrast) treatments. VIDEO_AUDIO leaves video hue/chroma at its source baseline and adds only a bounded nonnegative brightness accent, with distinct Brightness pulse/Beat pulse/EQ/Comet/Ripple/Bass sweep modulation. Bounded reusable smoothing reduces flicker; black/protected video blackouts app-owned output immediately.
 

@@ -21,12 +21,13 @@ class MainActivityCaptureUiSourceTest {
         assertFalse(source.contains("recoveryButton"))
     }
 
-    @Test fun singleScreenUsesCompactIndicatorAndIncludesMaintenanceActions() {
+    @Test fun singleScreenUsesCompactIndicatorAndKeepsOnlyLocalMaintenanceActions() {
         assertTrue(source.contains("captureIndicator.text = CaptureUiPresentation.indicator"))
         assertTrue(source.contains("text = \"Тест екрана:"))
         assertTrue(source.contains("buildAdditionalTools(mainPanel)"))
         val additional = source.substringAfter("private fun buildAdditionalTools").substringBefore("private fun addEffectSelector")
         assertTrue(additional.contains("Детальний локальний стан"))
-        assertTrue(additional.contains("Перевірити оновлення"))
+        assertFalse(additional.contains("Перевірити оновлення"))
+        assertFalse(source.contains("Home Assistant MQTT: приватний LAN broker"))
     }
 }

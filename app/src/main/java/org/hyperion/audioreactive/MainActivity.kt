@@ -239,7 +239,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var status: TextView
     private lateinit var captureButton: Button
     private lateinit var testButton: Button
-    private lateinit var updateButton: Button
     private lateinit var audioBox: CheckBox
     private lateinit var videoBox: CheckBox
     private lateinit var effectSpinner: Spinner
@@ -319,21 +318,23 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         captureButton.requestFocus()
         releaseUpdater = GitHubReleaseUpdater(
             applicationContext,
-            onStatus = { message, busy ->
+            onStatus = { message, _ ->
                 if (!isFinishing && !isDestroyed) {
                     status.text = message
-                    updateButton.isEnabled = !busy
                 }
             },
             onUpdateAvailable = {
                 if (!isFinishing && !isDestroyed) {
-                    updateButton.text = "Оновити"
-                    updateButton.contentDescription = "Завантажити, перевірити й відкрити системне підтвердження оновлення"
-                    updateButton.setOnClickListener { releaseUpdater.updateSelectedRelease() }
+                    AlertDialog.Builder(this)
+                        .setTitle("Доступне оновлення")
+                        .setMessage("Завантажити, перевірити та відкрити системне підтвердження встановлення?")
+                        .setNegativeButton("Ні", null)
+                        .setPositiveButton("Так") { _, _ -> releaseUpdater.updateSelectedRelease() }
+                        .show()
                 }
             },
         )
-        // Launch check fetches release metadata only; update remains an explicit visible D-pad action.
+        // Launch check fetches release metadata only. Download remains user-confirmed in this Activity.
         releaseUpdater.checkForUpdate()
         handleRemoteAction(intent)
     }
@@ -363,12 +364,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun buildAdditionalTools(panel: LinearLayout) {
         panel.addView(TextView(this).apply { text = "Додатково"; textSize = 18f })
         panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })
-        updateButton = Button(this).apply {
-            text = "Перевірити оновлення"
-            contentDescription = "Перевірити GitHub Releases лише за метаданими; завантаження і встановлення потребують окремих дій"
-            setOnClickListener { releaseUpdater.checkForUpdate() }
-        }
-        panel.addView(updateButton)
     }
 
     /** Compatible selector stays enabled: while active it mutates renderer-local state only. */
@@ -488,7 +483,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }
         panel.addView(zonesRow)
         panel.addView(Button(this).apply { text = "Налаштування MQTT"; setOnClickListener { showMqttSettingsDialog() } })
-        panel.addView(TextView(this).apply { text = "Home Assistant MQTT: приватний LAN broker. Адреса, порт і облікові дані редагуються локально; пароль не публікується." })
     }
 
     private fun updateEffectParameters(transform: (EffectParameters) -> EffectParameters) {
@@ -766,7 +760,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
 
     override fun onStart() { super.onStart(); ContextCompat.registerReceiver(this, receiver, IntentFilter(AudioReactiveService.ACTION_CAPTURE_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED) }
-    override fun onResume() { super.onResume(); refreshCaptureUi(true) }
+    override fun onResume() { super.onResume(); refreshCaptureUi(true); releaseUpdater.resumePendingInstall() }
     override fun onStop() { unregisterReceiver(receiver); super.onStop() }
     override fun onDestroy() { invalidatePendingCaptureAdmission(); captureToggleCoordinator.invalidatePending(); rainbowHandler.removeCallbacks(rainbowAnimator); rainbowHandler.removeCallbacks(movingBarsAnimator); RainbowVisualSourcePolicy.stop(); releaseUpdater.close(); work.shutdownNow(); super.onDestroy() }
     private fun handleCaptureToggle() {
