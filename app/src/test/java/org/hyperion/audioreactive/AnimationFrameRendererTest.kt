@@ -16,10 +16,14 @@ class AnimationFrameRendererTest {
         output.forEach { pixels -> assertTrue(pixels.any { it != 0.toByte() }) }
     }
 
-    @Test fun candleFireplaceAndFireworksHaveDistinctCompositionsAtTheSamePaletteAndTick() {
-        val output = listOf(AnimationEffect.CANDLE, AnimationEffect.FIREPLACE, AnimationEffect.FIREWORKS)
-            .map { render(it, tick = 37L) }
-        assertEquals(3, output.map { it.toList() }.distinct().size)
+    @Test fun everyReworkedEffectHasADistinctFrameAtTheSamePaletteAndTick() {
+        val effects = listOf(
+            AnimationEffect.WATER, AnimationEffect.LAKE, AnimationEffect.OCEAN,
+            AnimationEffect.CANDLE, AnimationEffect.FIREPLACE, AnimationEffect.FIREWORKS,
+            AnimationEffect.FIREWORK_BURSTS, AnimationEffect.SPARKLER,
+        )
+        val output = effects.map { render(it, tick = 37L) }
+        assertEquals(effects.size, output.map { it.toList() }.distinct().size)
         output.forEach { pixels -> assertTrue(pixels.any { it != 0.toByte() }) }
     }
 
@@ -27,6 +31,7 @@ class AnimationFrameRendererTest {
         listOf(
             AnimationEffect.WATER, AnimationEffect.LAKE, AnimationEffect.OCEAN,
             AnimationEffect.CANDLE, AnimationEffect.FIREPLACE, AnimationEffect.FIREWORKS,
+            AnimationEffect.FIREWORK_BURSTS, AnimationEffect.SPARKLER,
         ).forEach { effect ->
             assertFalse("$effect must animate", render(effect, tick = 37L).contentEquals(render(effect, tick = 81L)))
         }

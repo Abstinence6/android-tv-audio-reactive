@@ -57,8 +57,8 @@ class AnimationFrameRenderer(private val frame: SourceFrameSpec) {
                     Triple(if (colour == AnimationColour.AUTO) 12f + heat * 34f else baseHue, .96f, .035f + heat * .92f)
                 }
                 AnimationEffect.EMBERS -> Triple(if (colour == AnimationColour.AUTO) 22f else baseHue, .94f, (.18f + sparkle * .82f) * (1f - ny * .35f))
-                // Fireworks are expanding radial rings with a dark sky between bursts.
-                AnimationEffect.FIREWORKS, AnimationEffect.FIREWORK_BURSTS, AnimationEffect.SPARKLER -> {
+                // Fireworks are one bright expanding radial ring against a dark sky.
+                AnimationEffect.FIREWORKS -> {
                     val burst = (time * .18f) % 1f
                     val centerX = .2f + ((tick / 18L) % 4) * .22f
                     val centerY = .24f + ((tick / 31L) % 3) * .16f
@@ -66,6 +66,28 @@ class AnimationFrameRenderer(private val frame: SourceFrameSpec) {
                     val ring = (1f - abs(radius - (.06f + burst * .62f)) * 22f).coerceIn(0f, 1f) * (1f - burst * .55f)
                     val spokes = ((sin(radius * 110f - time * 6f + nx * 18f) + 1f) * .5f)
                     Triple(baseHue + nx * 145f + burst * 80f, .88f - burst * .22f, .012f + ring * (.35f + spokes * .65f))
+                }
+                // Firework bursts overlap three smaller blooms, each with a separate cadence.
+                AnimationEffect.FIREWORK_BURSTS -> {
+                    val phaseA = (time * .24f) % 1f
+                    val phaseB = (time * .17f + .37f) % 1f
+                    val phaseC = (time * .21f + .71f) % 1f
+                    fun bloom(cx: Float, cy: Float, phase: Float): Float {
+                        val radius = sqrt((nx - cx) * (nx - cx) + (ny - cy) * (ny - cy))
+                        return (1f - abs(radius - (.03f + phase * .38f)) * 30f).coerceIn(0f, 1f) * (1f - phase * .5f)
+                    }
+                    val burst = maxOf(bloom(.22f, .28f, phaseA), bloom(.54f, .45f, phaseB), bloom(.78f, .22f, phaseC))
+                    Triple(baseHue + ny * 120f + time * 35f, .9f, .01f + burst * .99f)
+                }
+                // A sparkler has a fixed hot wand tip and dense, short-lived outward sparks.
+                AnimationEffect.SPARKLER -> {
+                    val tipX = .5f + sin(time * 1.4f) * .12f
+                    val tipY = .64f + sin(time * 2.1f) * .04f
+                    val distance = sqrt((nx - tipX) * (nx - tipX) + (ny - tipY) * (ny - tipY))
+                    val angle = kotlin.math.atan2(ny - tipY, nx - tipX)
+                    val rays = ((sin(angle * 13f + time * 9f) + 1f) * .5f)
+                    val sparks = (1f - distance * (7f + rays * 14f)).coerceIn(0f, 1f)
+                    Triple(if (colour == AnimationColour.AUTO) 45f + rays * 20f else baseHue, .35f + rays * .5f, .008f + sparks * (.3f + rays * .7f))
                 }
                 AnimationEffect.AURORA, AnimationEffect.NORTHERN_LIGHTS -> Triple(baseHue + wave * 80f, .78f, .15f + wave * .72f)
                 AnimationEffect.LAVA_LAMP -> Triple(baseHue + wave * 100f, .82f, .22f + wave * .68f)
