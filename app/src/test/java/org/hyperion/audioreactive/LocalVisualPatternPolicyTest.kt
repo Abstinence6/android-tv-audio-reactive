@@ -39,7 +39,11 @@ class LocalVisualPatternPolicyTest {
         val visualBlock = source.substringAfter("private fun showLocalVisualPattern")
             .substringBefore("private fun showMqttSettingsDialog")
 
-        assertTrue(source.contains("private class LocalVisualPatternDrawable"))
+        val drawableSource = sequenceOf(
+            File("src/main/java/org/hyperion/audioreactive/LocalVisualPatterns.kt"),
+            File("app/src/main/java/org/hyperion/audioreactive/LocalVisualPatterns.kt"),
+        ).first(File::isFile).readText()
+        assertTrue(drawableSource.contains("class LocalVisualPatternDrawable"))
         assertTrue(source.contains("contentRoot.background = LocalVisualPatternDrawable"))
         assertTrue(visualBlock.contains("RainbowVisualSourcePolicy.start()"))
         assertFalse(visualBlock.contains("MediaProjection"))
@@ -59,10 +63,14 @@ class LocalVisualPatternPolicyTest {
         val visualBlock = source.substringAfter("private fun showLocalVisualPattern")
             .substringBefore("private fun showMqttSettingsDialog")
 
+        val drawableSource = sequenceOf(
+            File("src/main/java/org/hyperion/audioreactive/LocalVisualPatterns.kt"),
+            File("app/src/main/java/org/hyperion/audioreactive/LocalVisualPatterns.kt"),
+        ).first(File::isFile).readText()
         assertFalse(animatorBlock.contains("LocalVisualPatternDrawable("))
         assertTrue(animatorBlock.contains("movingBarsDrawable?.updatePhase(movingPatternPhase)"))
-        assertTrue(source.contains("fun updatePhase(value: Float)"))
-        assertTrue(source.contains("invalidateSelf()"))
+        assertTrue(drawableSource.contains("fun updatePhase(value: Float)"))
+        assertTrue(drawableSource.contains("invalidateSelf()"))
         assertTrue(visualBlock.contains("movingBarsDrawable = LocalVisualPatternDrawable(LocalVisualStyle.MOVING_BARS, movingPatternPhase)"))
         assertTrue(visualBlock.contains("rainbowHandler.removeCallbacks(movingBarsAnimator)"))
     }
