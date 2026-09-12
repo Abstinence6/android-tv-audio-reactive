@@ -100,7 +100,7 @@ class VideoModePolicyTest {
     @Test fun videoAudioSilenceFloorPreservesNonBlackVideoAndHoldDefersZeroFloorBlackout() {
         val processor = processorWith(80, 40, 20)
         val silent = AudioFeatures(0f, 0f, 0f, 0f, 0f, 0f, FloatArray(AudioFeatures.BAND_COUNT), false)
-        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = .7f)
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = .7f, silenceFadeEnabled = true)
         val raw = processor.compose(silent, base.copy(videoAudioSilenceBrightnessFloor = .2f)).copyOf()
         assertTrue(raw.any { it != 0.toByte() })
         assertFalse(FrameSmoothingPolicy.immediateBlack(base.copy(videoAudioSilenceBrightnessFloor = .2f), false))
@@ -228,6 +228,7 @@ class VideoModePolicyTest {
         val persisted = AudioSettings.defaults().copy(brightness = .7f, renderMode = RenderMode.VIDEO_AUDIO)
         LiveRendererSettings.begin(persisted)
         try {
+            LiveRendererSettings.setSilenceFadeEnabled(true)
             LiveRendererSettings.setVideoAudioSilenceBrightnessFloor(.4f, .7f)
             assertFalse(FrameSmoothingPolicy.immediateBlack(LiveRendererSettings.apply(persisted), false))
             LiveRendererSettings.setBrightness(.2f)

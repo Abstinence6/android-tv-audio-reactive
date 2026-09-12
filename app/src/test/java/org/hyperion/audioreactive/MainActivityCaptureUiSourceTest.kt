@@ -26,7 +26,8 @@ class MainActivityCaptureUiSourceTest {
         assertTrue(source.contains("if (restartForInputOwnership) AudioReactiveService.stopExisting(this)"))
         assertTrue(source.contains("audioSection.visibility = if (audio) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE"))
-        assertTrue(source.contains("silenceBrightnessRow.visibility = if (mixed) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("silenceFadeToggle.visibility = if (mixed) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("silenceBrightnessRow.visibility = if (mixed && settings.silenceFadeEnabled) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("animationColourRow.visibility = if (animation) View.VISIBLE else View.GONE"))
     }
 

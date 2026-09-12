@@ -72,6 +72,15 @@ class RuntimeSettingsTest {
         assertTrue(!saved.copy(videoAudioSilenceBrightnessFloor = .8f).valid())
     }
 
+    @Test fun smoothSilenceFadeTogglePersistsAsAnOptInSetting() {
+        val store = MemoryStore(null)
+        val saved = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, silenceFadeEnabled = true)
+        RuntimeSettings.initialize(store)
+        RuntimeSettings.apply(saved)
+        RuntimeSettings.initialize(store)
+        assertTrue(RuntimeSettings.snapshot().silenceFadeEnabled)
+    }
+
     @Test fun everyVideoQualityMapsToASupportedCaptureFrame() {
         val expected = listOf(
             VideoQuality.VERY_LOW to SourceFrameSpec(64, 36, 20),

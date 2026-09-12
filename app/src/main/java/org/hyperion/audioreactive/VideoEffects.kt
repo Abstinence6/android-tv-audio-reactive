@@ -104,11 +104,12 @@ object LiveRendererSettings {
     private var videoAudioSilenceBrightnessFloor: Float? = null
     private var silenceHoldMillis: Int? = null
     private var silenceFadeMillis: Int? = null
+    private var silenceFadeEnabled: Boolean? = null
     private var admitted: AudioSettings? = null
 
 
-    @Synchronized fun begin(settings: AudioSettings) { active = true; admitted = settings; effect = null; videoEffect = null; videoAudioEffect = null; animationEffect = null; animationColour = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null; silenceHoldMillis = null; silenceFadeMillis = null }
-    @Synchronized fun end() { active = false; admitted = null; effect = null; videoEffect = null; videoAudioEffect = null; animationEffect = null; animationColour = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null; silenceHoldMillis = null; silenceFadeMillis = null }
+    @Synchronized fun begin(settings: AudioSettings) { active = true; admitted = settings; effect = null; videoEffect = null; videoAudioEffect = null; animationEffect = null; animationColour = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null; silenceHoldMillis = null; silenceFadeMillis = null; silenceFadeEnabled = null }
+    @Synchronized fun end() { active = false; admitted = null; effect = null; videoEffect = null; videoAudioEffect = null; animationEffect = null; animationColour = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null; silenceHoldMillis = null; silenceFadeMillis = null; silenceFadeEnabled = null }
     @Synchronized fun setEffect(value: Effect) { if (active) effect = value }
     @Synchronized fun setVideoEffect(value: VideoEffect) { if (active) videoEffect = value }
     @Synchronized fun setVideoAudioEffect(value: VideoAudioEffect) { if (active) videoAudioEffect = value }
@@ -139,6 +140,7 @@ object LiveRendererSettings {
     @Synchronized fun setVideoAudioSilenceBrightnessFloor(value: Float, ceiling: Float) { if (active && value in 0f..ceiling) videoAudioSilenceBrightnessFloor = value }
     @Synchronized fun setSilenceHoldMillis(value: Int) { if (active && value in 0..3_000) silenceHoldMillis = value }
     @Synchronized fun setSilenceFadeMillis(value: Int) { if (active && value in 100..2_000) silenceFadeMillis = value }
+    @Synchronized fun setSilenceFadeEnabled(value: Boolean) { if (active) silenceFadeEnabled = value }
     /** Consecutive live edits use the last live value, not a stale persisted snapshot. */
     @Synchronized fun updateParameters(persisted: EffectParameters, transform: (EffectParameters) -> EffectParameters) {
         transform(parameters ?: persisted).takeIf(EffectParameters::valid)?.let { parameters = it }
@@ -159,6 +161,7 @@ object LiveRendererSettings {
         videoAudioSilenceBrightnessFloor = (videoAudioSilenceBrightnessFloor ?: settings.videoAudioSilenceBrightnessFloor).coerceIn(0f, resolvedBrightness),
         silenceHoldMillis = silenceHoldMillis ?: settings.silenceHoldMillis,
         silenceFadeMillis = silenceFadeMillis ?: settings.silenceFadeMillis,
+        silenceFadeEnabled = silenceFadeEnabled ?: settings.silenceFadeEnabled,
     )
     }
 }

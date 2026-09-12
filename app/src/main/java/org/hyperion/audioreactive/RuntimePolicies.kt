@@ -8,10 +8,10 @@ object FrameSmoothingPolicy {
     fun immediateBlack(brightness: Float, signalPresent: Boolean?): Boolean = brightness == 0f || signalPresent == false
 }
 
-/** A positive VIDEO_AUDIO floor changes only silence behavior; protected/black source handling remains terminal. */
+/** An explicit VIDEO_AUDIO toggle changes only silence behavior; protected/black source handling remains terminal. */
 object VideoAudioSilenceBrightnessPolicy {
     fun retainsVideo(settings: AudioSettings) = settings.renderMode == RenderMode.VIDEO_AUDIO &&
-        (settings.videoAudioSilenceBrightnessFloor > 0f || settings.silenceHoldMillis > 0)
+        settings.silenceFadeEnabled
 }
 
 /** Fixed-state, timestamp-driven VIDEO_AUDIO silence transition with no render-time allocation. */
@@ -24,7 +24,7 @@ class SilenceBrightnessController {
     fun currentState() = state
 
     fun compose(settings: AudioSettings, signalPresent: Boolean?, timestampNanos: Long): Float {
-        if (settings.renderMode != RenderMode.VIDEO_AUDIO) {
+        if (settings.renderMode != RenderMode.VIDEO_AUDIO || !settings.silenceFadeEnabled) {
             reset(timestampNanos)
             return settings.brightness
         }

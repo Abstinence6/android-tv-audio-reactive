@@ -235,6 +235,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var audioSection: TextView
     private lateinit var sensitivityRow: LinearLayout
     private lateinit var silenceBrightnessRow: LinearLayout
+    private lateinit var silenceFadeToggle: CheckBox
     private lateinit var silenceHoldRow: LinearLayout
     private lateinit var silenceFadeRow: LinearLayout
     private lateinit var videoColourTreatmentRow: LinearLayout
@@ -447,6 +448,13 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             updateVideoAudioSilenceBrightnessFloor(it * .05f)
         }
         panel.addView(silenceBrightnessRow)
+        silenceFadeToggle = CheckBox(this).apply {
+            id = View.generateViewId()
+            text = getString(R.string.silence_fade_enabled)
+            isChecked = RuntimeSettings.snapshot().silenceFadeEnabled
+            setOnCheckedChangeListener { _, enabled -> updateSilenceFadeEnabled(enabled) }
+        }
+        panel.addView(silenceFadeToggle)
         silenceHoldRow = sliderRow(getString(R.string.silence_hold), RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, true, { getString(R.string.milliseconds, it * 100) }) { updateSilenceHoldMillis(it * 100) }
         panel.addView(silenceHoldRow)
         silenceFadeRow = sliderRow(getString(R.string.silence_fade), (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, true, { getString(R.string.milliseconds, 100 + it * 100) }) { updateSilenceFadeMillis(100 + it * 100) }
@@ -544,6 +552,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
     private fun updateSilenceHoldMillis(value: Int) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceHoldMillis(value) else RuntimeSettings.update { it.copy(silenceHoldMillis = value) } }
     private fun updateSilenceFadeMillis(value: Int) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceFadeMillis(value) else RuntimeSettings.update { it.copy(silenceFadeMillis = value) } }
+    private fun updateSilenceFadeEnabled(value: Boolean) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceFadeEnabled(value) else RuntimeSettings.update { it.copy(silenceFadeEnabled = value) } }
 
 
     private fun sliderRow(label: String, initial: Int, max: Int, liveMutable: Boolean = false, format: (Int) -> String, apply: (Int) -> Unit): LinearLayout =
@@ -765,9 +774,11 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         qualityRow.visibility = if (video) View.VISIBLE else View.GONE
         audioSection.visibility = if (audio) View.VISIBLE else View.GONE
         sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE
-        silenceBrightnessRow.visibility = if (mixed) View.VISIBLE else View.GONE
-        silenceHoldRow.visibility = if (mixed) View.VISIBLE else View.GONE
-        silenceFadeRow.visibility = if (mixed) View.VISIBLE else View.GONE
+        silenceFadeToggle.visibility = if (mixed) View.VISIBLE else View.GONE
+        if (silenceFadeToggle.isChecked != settings.silenceFadeEnabled) silenceFadeToggle.isChecked = settings.silenceFadeEnabled
+        silenceBrightnessRow.visibility = if (mixed && settings.silenceFadeEnabled) View.VISIBLE else View.GONE
+        silenceHoldRow.visibility = if (mixed && settings.silenceFadeEnabled) View.VISIBLE else View.GONE
+        silenceFadeRow.visibility = if (mixed && settings.silenceFadeEnabled) View.VISIBLE else View.GONE
         videoColourTreatmentRow.visibility = if (TvUiStatePolicy.showVideoColourTreatment(settings.renderMode)) View.VISIBLE else View.GONE
         suppressVideoColourTreatmentSelection = true
         try {
