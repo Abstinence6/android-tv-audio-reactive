@@ -184,11 +184,12 @@ internal object VideoCaptureFailurePolicy { fun blackoutAndTerminate(stopRoute: 
 object CaptureModeCheckboxPolicy {
     data class Result(val mode: RenderMode, val audioChecked: Boolean, val videoChecked: Boolean, val animationChecked: Boolean = false, val rejected: Boolean)
     fun resolve(audio: Boolean, video: Boolean, previous: RenderMode): Result = resolve(audio, video, false, previous)
+    /** Capture inputs win if an accessibility/service callback briefly reports both selectors checked. */
     fun resolve(audio: Boolean, video: Boolean, animation: Boolean, previous: RenderMode): Result = when {
-        animation -> Result(RenderMode.ANIMATION, false, false, true, false)
         audio && video -> Result(RenderMode.VIDEO_AUDIO, true, true, false, false)
         audio -> Result(RenderMode.AUDIO, true, false, false, false)
         video -> Result(RenderMode.VIDEO, false, true, false, false)
+        animation -> Result(RenderMode.ANIMATION, false, false, true, false)
         else -> when (previous) {
             RenderMode.AUDIO -> Result(previous, true, false, false, true)
             RenderMode.VIDEO -> Result(previous, false, true, false, true)
@@ -198,6 +199,11 @@ object CaptureModeCheckboxPolicy {
     }
 }
 object EffectSelectionPolicy { fun enabledWhileCaptureActive() = true }
+/** Crossing the no-input boundary requires a fresh service admission; live mode changes cannot create capture inputs. */
+object AnimationModeTransitionPolicy {
+    fun requiresRestart(serviceActive: Boolean, current: RenderMode, requested: RenderMode): Boolean =
+        serviceActive && (current == RenderMode.ANIMATION) != (requested == RenderMode.ANIMATION)
+}
 /** Local UI-only diagnostic state. It deliberately has no capture, route, discovery, or socket API. */
 object RainbowVisualSourcePolicy {
     @Volatile var running = false

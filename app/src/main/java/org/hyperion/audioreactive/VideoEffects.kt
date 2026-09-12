@@ -176,9 +176,3 @@ object LiveRenderModeUiPolicy {
         previous = mode,
     )
 }
-
-/** Only these controls are read atomically by the active renderer. Route/capture controls remain locked. */
-object LiveRendererControlPolicy {
-    val sliderLabels = setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Затримка тиші", "Плавність тиші", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри")
-    fun sliderMutable(label: String) = label in sliderLabels
-}

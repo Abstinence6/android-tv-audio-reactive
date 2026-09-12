@@ -15,12 +15,37 @@ class VideoModePolicyTest {
         assertTrue(result.rejected); assertEquals(RenderMode.VIDEO, result.mode); assertTrue(result.videoChecked)
     }
 
-    @Test fun noInputAnimationIsExplicitlySelectableAndTheOnlyCheckedMode() {
-        val selected = CaptureModeCheckboxPolicy.resolve(audio = true, video = true, animation = true, previous = RenderMode.VIDEO_AUDIO)
+    @Test fun noInputAnimationIsExplicitlySelectableAndEveryCaptureSelectionEscapesIt() {
+        val selected = CaptureModeCheckboxPolicy.resolve(audio = false, video = false, animation = true, previous = RenderMode.VIDEO_AUDIO)
         assertEquals(RenderMode.ANIMATION, selected.mode)
         assertFalse(selected.audioChecked); assertFalse(selected.videoChecked); assertTrue(selected.animationChecked); assertFalse(selected.rejected)
+
+        listOf(
+            Triple(true, false, RenderMode.AUDIO),
+            Triple(false, true, RenderMode.VIDEO),
+            Triple(true, true, RenderMode.VIDEO_AUDIO),
+        ).forEach { (audio, video, expected) ->
+            val captureFromAnimation = CaptureModeCheckboxPolicy.resolve(audio, video, animation = true, previous = RenderMode.ANIMATION)
+            assertEquals(expected, captureFromAnimation.mode)
+            assertEquals(audio, captureFromAnimation.audioChecked)
+            assertEquals(video, captureFromAnimation.videoChecked)
+            assertFalse(captureFromAnimation.animationChecked)
+            assertFalse(captureFromAnimation.rejected)
+        }
+
         val retained = CaptureModeCheckboxPolicy.resolve(audio = false, video = false, animation = false, previous = RenderMode.ANIMATION)
         assertEquals(RenderMode.ANIMATION, retained.mode); assertTrue(retained.animationChecked); assertTrue(retained.rejected)
+    }
+
+    @Test fun everyCrossingOfTheAnimationInputBoundaryRequiresAStopAndFreshAdmission() {
+        val inputModes = listOf(RenderMode.AUDIO, RenderMode.VIDEO, RenderMode.VIDEO_AUDIO)
+        inputModes.forEach { input ->
+            assertTrue("animation -> $input", AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.ANIMATION, input))
+            assertTrue("$input -> animation", AnimationModeTransitionPolicy.requiresRestart(true, input, RenderMode.ANIMATION))
+            assertFalse("inactive animation -> $input", AnimationModeTransitionPolicy.requiresRestart(false, RenderMode.ANIMATION, input))
+        }
+        assertFalse(AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.AUDIO, RenderMode.VIDEO_AUDIO))
+        assertFalse(AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.ANIMATION, RenderMode.ANIMATION))
     }
 
     @Test fun selectorAlwaysUsesTheCurrentModeCatalogueAndCanonicalIndex() {

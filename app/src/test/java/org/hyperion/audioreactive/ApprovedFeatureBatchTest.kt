@@ -61,11 +61,14 @@ class ApprovedFeatureBatchTest {
         } finally { LiveRendererSettings.end() }
     }
 
-    @Test fun onlyRendererLocalControlsAreLiveMutable() {
-        assertEquals(setOf("Чутливість", "Яскравість", "Мінімальна яскравість без звуку", "Затримка тиші", "Плавність тиші", "Насиченість відео", "Швидкість", "Слід", "Поріг біту", "Зсув палітри"), LiveRendererControlPolicy.sliderLabels)
-        assertTrue(LiveRendererControlPolicy.sliderMutable("Яскравість"))
-        assertFalse(LiveRendererControlPolicy.sliderMutable("FPS (Аудіо / Відео / Аудіо+відео)"))
-        assertFalse(LiveRendererControlPolicy.sliderMutable("Зони джерела WLED"))
+    @Test fun controlsFollowTheActiveRenderCapabilityRatherThanLocalizedLabels() {
+        assertTrue(TvUiStatePolicy.showAudioControls(RenderMode.AUDIO))
+        assertTrue(TvUiStatePolicy.showAudioControls(RenderMode.VIDEO_AUDIO))
+        assertFalse(TvUiStatePolicy.showAudioControls(RenderMode.VIDEO))
+        assertFalse(TvUiStatePolicy.showAudioControls(RenderMode.ANIMATION))
+        assertTrue(TvUiStatePolicy.showVideoAudioControls(RenderMode.VIDEO_AUDIO))
+        assertFalse(TvUiStatePolicy.showVideoAudioControls(RenderMode.ANIMATION))
+        assertTrue(TvUiStatePolicy.showAnimationControls(RenderMode.ANIMATION))
     }
 
 

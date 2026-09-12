@@ -21,6 +21,15 @@ class MainActivityCaptureUiSourceTest {
         assertFalse(source.contains("recoveryButton"))
     }
 
+    @Test fun animationToCaptureModeStopsTheNoInputServiceAndHidesAudioOnlyControls() {
+        assertTrue(source.contains("AnimationModeTransitionPolicy.requiresRestart"))
+        assertTrue(source.contains("if (restartForInputOwnership) AudioReactiveService.stopExisting(this)"))
+        assertTrue(source.contains("audioSection.visibility = if (audio) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("silenceBrightnessRow.visibility = if (mixed) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("animationColourRow.visibility = if (animation) View.VISIBLE else View.GONE"))
+    }
+
     @Test fun singleScreenUsesCompactIndicatorAndKeepsOnlyLocalMaintenanceActions() {
         assertTrue(source.contains("captureIndicator.text = CaptureUiPresentation.indicator"))
         assertTrue(source.contains("text = getString(R.string.screen_test"))

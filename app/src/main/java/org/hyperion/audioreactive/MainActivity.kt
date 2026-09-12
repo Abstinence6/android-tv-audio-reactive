@@ -232,11 +232,21 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var outputRows: LinearLayout
     private lateinit var qualityRow: LinearLayout
     private lateinit var videoFpsRow: LinearLayout
+    private lateinit var audioSection: TextView
+    private lateinit var sensitivityRow: LinearLayout
+    private lateinit var silenceBrightnessRow: LinearLayout
+    private lateinit var silenceHoldRow: LinearLayout
+    private lateinit var silenceFadeRow: LinearLayout
     private lateinit var videoColourTreatmentRow: LinearLayout
     private lateinit var videoColourTreatmentSpinner: Spinner
     private lateinit var videoSaturationRow: LinearLayout
     private lateinit var animationColourRow: LinearLayout
     private lateinit var animationColourSpinner: Spinner
+    private lateinit var effectParametersTitle: TextView
+    private lateinit var speedRow: LinearLayout
+    private lateinit var trailRow: LinearLayout
+    private lateinit var beatThresholdRow: LinearLayout
+    private lateinit var paletteShiftRow: LinearLayout
     private lateinit var zonesRow: LinearLayout
     private lateinit var discoverButton: Button
 
@@ -418,25 +428,31 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         })
         panel.addView(qualityRow)
         modeMutableRows += qualityRow
-        videoFpsRow = sliderRow(getString(R.string.fps_label), VideoCapturePolicy.fpsOptions.indexOf(RuntimeSettings.snapshot().fps).coerceAtLeast(0), VideoCapturePolicy.fpsOptions.lastIndex, { getString(R.string.fps_value, VideoCapturePolicy.fpsOptions[it]) }) {
+        videoFpsRow = sliderRow(getString(R.string.fps_label), VideoCapturePolicy.fpsOptions.indexOf(RuntimeSettings.snapshot().fps).coerceAtLeast(0), VideoCapturePolicy.fpsOptions.lastIndex, false, { getString(R.string.fps_value, VideoCapturePolicy.fpsOptions[it]) }) {
             RuntimeSettings.update { settings -> settings.copy(fps = VideoCapturePolicy.fpsOptions[it]) }
         }
         panel.addView(videoFpsRow)
         modeMutableRows += videoFpsRow
 
-        panel.addView(TextView(this).apply { text = getString(R.string.audio_section) })
-        sliderRow(getString(R.string.sensitivity), ((RuntimeSettings.snapshot().sensitivity - .25f) / .05f).toInt(), 60, { SliderFormatters.sensitivity(this, .25f + it * .05f) }) {
+        audioSection = TextView(this).apply { text = getString(R.string.audio_section) }
+        panel.addView(audioSection)
+        sensitivityRow = sliderRow(getString(R.string.sensitivity), ((RuntimeSettings.snapshot().sensitivity - .25f) / .05f).toInt(), 60, true, { SliderFormatters.sensitivity(this, .25f + it * .05f) }) {
             updateSensitivity(.25f + it * .05f)
-        }.also(panel::addView)
-        sliderRow(getString(R.string.brightness), (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, { SliderFormatters.brightness(this, it * .05f) }) {
+        }
+        panel.addView(sensitivityRow)
+        panel.addView(sliderRow(getString(R.string.brightness), (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
             updateBrightness(it * .05f)
-        }.also(panel::addView)
-        sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, { SliderFormatters.brightness(this, it * .05f) }) {
+        })
+        silenceBrightnessRow = sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
             updateVideoAudioSilenceBrightnessFloor(it * .05f)
-        }.also(panel::addView)
-        sliderRow(getString(R.string.silence_hold), RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, { getString(R.string.milliseconds, it * 100) }) { updateSilenceHoldMillis(it * 100) }.also(panel::addView)
-        sliderRow(getString(R.string.silence_fade), (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, { getString(R.string.milliseconds, 100 + it * 100) }) { updateSilenceFadeMillis(100 + it * 100) }.also(panel::addView)
-        panel.addView(TextView(this).apply { text = getString(R.string.effect_parameters) })
+        }
+        panel.addView(silenceBrightnessRow)
+        silenceHoldRow = sliderRow(getString(R.string.silence_hold), RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, true, { getString(R.string.milliseconds, it * 100) }) { updateSilenceHoldMillis(it * 100) }
+        panel.addView(silenceHoldRow)
+        silenceFadeRow = sliderRow(getString(R.string.silence_fade), (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, true, { getString(R.string.milliseconds, 100 + it * 100) }) { updateSilenceFadeMillis(100 + it * 100) }
+        panel.addView(silenceFadeRow)
+        effectParametersTitle = TextView(this).apply { text = getString(R.string.effect_parameters) }
+        panel.addView(effectParametersTitle)
         videoColourTreatmentRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
         videoColourTreatmentRow.addView(TextView(this).apply { text = getString(R.string.video_colour_treatment) })
         videoColourTreatmentSpinner = Spinner(this).apply {
@@ -456,7 +472,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }
         videoColourTreatmentRow.addView(videoColourTreatmentSpinner)
         panel.addView(videoColourTreatmentRow)
-        videoSaturationRow = sliderRow(getString(R.string.video_saturation), RuntimeSettings.snapshot().videoSaturationPercent, VideoSaturationPolicy.MAX_PERCENT, { getString(R.string.format_percent, it) }) { value ->
+        videoSaturationRow = sliderRow(getString(R.string.video_saturation), RuntimeSettings.snapshot().videoSaturationPercent, VideoSaturationPolicy.MAX_PERCENT, true, { getString(R.string.format_percent, it) }) { value ->
             if (AudioReactiveService.exists()) LiveRendererSettings.setVideoSaturationPercent(value)
             else RuntimeSettings.update { it.copy(videoSaturationPercent = value) }
         }
@@ -476,10 +492,14 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }
         animationColourRow.addView(animationColourSpinner)
         panel.addView(animationColourRow)
-        sliderRow(getString(R.string.speed), ((RuntimeSettings.snapshot().effectParameters.speed - .25f) / .25f).toInt(), 11, { getString(R.string.format_multiplier, .25f + it * .25f) }) { v -> updateEffectParameters { it.copy(speed = .25f + v * .25f) } }.also { panel.addView(it) }
-        sliderRow(getString(R.string.trail), (RuntimeSettings.snapshot().effectParameters.trail * 10).toInt(), 10, { getString(R.string.format_percent, it * 10) }) { v -> updateEffectParameters { it.copy(trail = v / 10f) } }.also { panel.addView(it) }
-        sliderRow(getString(R.string.beat_threshold), ((RuntimeSettings.snapshot().effectParameters.beatThreshold - .05f) / .05f).toInt(), 18, { getString(R.string.format_percent, 5 + it * 5) }) { v -> updateEffectParameters { it.copy(beatThreshold = .05f + v * .05f) } }.also { panel.addView(it) }
-        sliderRow(getString(R.string.palette_shift), ((RuntimeSettings.snapshot().effectParameters.hueShift + 180f) / 15f).toInt(), 24, { getString(R.string.format_degrees, -180 + it * 15) }) { v -> updateEffectParameters { it.copy(hueShift = -180f + v * 15f) } }.also { panel.addView(it) }
+        speedRow = sliderRow(getString(R.string.speed), ((RuntimeSettings.snapshot().effectParameters.speed - .25f) / .25f).toInt(), 11, true, { getString(R.string.format_multiplier, .25f + it * .25f) }) { v -> updateEffectParameters { it.copy(speed = .25f + v * .25f) } }
+        panel.addView(speedRow)
+        trailRow = sliderRow(getString(R.string.trail), (RuntimeSettings.snapshot().effectParameters.trail * 10).toInt(), 10, true, { getString(R.string.format_percent, it * 10) }) { v -> updateEffectParameters { it.copy(trail = v / 10f) } }
+        panel.addView(trailRow)
+        beatThresholdRow = sliderRow(getString(R.string.beat_threshold), ((RuntimeSettings.snapshot().effectParameters.beatThreshold - .05f) / .05f).toInt(), 18, true, { getString(R.string.format_percent, 5 + it * 5) }) { v -> updateEffectParameters { it.copy(beatThreshold = .05f + v * .05f) } }
+        panel.addView(beatThresholdRow)
+        paletteShiftRow = sliderRow(getString(R.string.palette_shift), ((RuntimeSettings.snapshot().effectParameters.hueShift + 180f) / 15f).toInt(), 24, true, { getString(R.string.format_degrees, -180 + it * 15) }) { v -> updateEffectParameters { it.copy(hueShift = -180f + v * 15f) } }
+        panel.addView(paletteShiftRow)
     }
 
     private fun buildOutputsTab(panel: LinearLayout) {
@@ -494,7 +514,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         panel.addView(discoverButton)
         outputRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(outputRows)
-        zonesRow = sliderRow(getString(R.string.source_zones), RuntimeSettings.snapshot().wledSourceZones / 16 - 1, 31, { "${(it + 1) * 16}" }) {
+        zonesRow = sliderRow(getString(R.string.source_zones), RuntimeSettings.snapshot().wledSourceZones / 16 - 1, 31, false, { "${(it + 1) * 16}" }) {
             RuntimeSettings.update { settings -> settings.copy(wledSourceZones = (it + 1) * 16) }
         }
         panel.addView(zonesRow)
@@ -526,7 +546,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun updateSilenceFadeMillis(value: Int) { if (AudioReactiveService.exists()) LiveRendererSettings.setSilenceFadeMillis(value) else RuntimeSettings.update { it.copy(silenceFadeMillis = value) } }
 
 
-    private fun sliderRow(label: String, initial: Int, max: Int, format: (Int) -> String, apply: (Int) -> Unit): LinearLayout =
+    private fun sliderRow(label: String, initial: Int, max: Int, liveMutable: Boolean = false, format: (Int) -> String, apply: (Int) -> Unit): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val value = TextView(this@MainActivity)
@@ -541,7 +561,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                     override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         show(progress)
-                        if (fromUser && (!AudioReactiveService.exists() || LiveRendererControlPolicy.sliderMutable(label))) apply(progress)
+                        if (fromUser && (!AudioReactiveService.exists() || liveMutable)) apply(progress)
                     }
                 })
             })
@@ -553,10 +573,14 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val persisted = RuntimeSettings.snapshot()
         val previous = effectiveRenderSettings().renderMode
         val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, animationBox.isChecked, previous)
-        val accepted = !AudioReactiveService.exists() || LiveRendererSettings.setRenderMode(result.mode)
+        // ANIMATION owns neither projection nor AudioRecord. Crossing that boundary must stop the
+        // current service so the next capture press performs fresh permission and resource admission.
+        val restartForInputOwnership = AnimationModeTransitionPolicy.requiresRestart(AudioReactiveService.exists(), previous, result.mode)
+        if (restartForInputOwnership) AudioReactiveService.stopExisting(this)
+        val accepted = restartForInputOwnership || !AudioReactiveService.exists() || LiveRendererSettings.setRenderMode(result.mode)
         val visible = LiveRenderModeUiPolicy.checkboxes(
             if (accepted) {
-                if (AudioReactiveService.exists()) effectiveRenderSettings().renderMode else result.mode
+                if (AudioReactiveService.exists() && !restartForInputOwnership) effectiveRenderSettings().renderMode else result.mode
             } else previous
         )
         suppressModeCallbacks = true
@@ -564,7 +588,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         videoBox.isChecked = visible.videoChecked
         animationBox.isChecked = visible.animationChecked
         suppressModeCallbacks = false
-        if (!AudioReactiveService.exists()) RuntimeSettings.update { it.copy(renderMode = result.mode) }
+        if (restartForInputOwnership || !AudioReactiveService.exists()) RuntimeSettings.update { it.copy(renderMode = result.mode) }
         if (!accepted) status.text = getString(R.string.video_change_rejected)
         else if (result.rejected) status.text = getString(R.string.no_mode_selected)
         rebuildEffectSelector()
@@ -735,7 +759,15 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun refreshConditionalControls() {
         val settings = effectiveRenderSettings()
         val video = TvUiStatePolicy.showVideoControls(settings.renderMode)
+        val audio = TvUiStatePolicy.showAudioControls(settings.renderMode)
+        val mixed = TvUiStatePolicy.showVideoAudioControls(settings.renderMode)
+        val animation = TvUiStatePolicy.showAnimationControls(settings.renderMode)
         qualityRow.visibility = if (video) View.VISIBLE else View.GONE
+        audioSection.visibility = if (audio) View.VISIBLE else View.GONE
+        sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE
+        silenceBrightnessRow.visibility = if (mixed) View.VISIBLE else View.GONE
+        silenceHoldRow.visibility = if (mixed) View.VISIBLE else View.GONE
+        silenceFadeRow.visibility = if (mixed) View.VISIBLE else View.GONE
         videoColourTreatmentRow.visibility = if (TvUiStatePolicy.showVideoColourTreatment(settings.renderMode)) View.VISIBLE else View.GONE
         suppressVideoColourTreatmentSelection = true
         try {
@@ -744,7 +776,13 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             suppressVideoColourTreatmentSelection = false
         }
         videoSaturationRow.visibility = if (TvUiStatePolicy.showVideoSaturation(settings.renderMode)) View.VISIBLE else View.GONE
-        animationColourRow.visibility = if (TvUiStatePolicy.showAnimationControls(settings.renderMode)) View.VISIBLE else View.GONE
+        animationColourRow.visibility = if (animation) View.VISIBLE else View.GONE
+        // Animation uses only its palette and speed; audio-only shaping controls are never shown there.
+        speedRow.visibility = if (settings.renderMode != RenderMode.VIDEO) View.VISIBLE else View.GONE
+        trailRow.visibility = if (audio) View.VISIBLE else View.GONE
+        beatThresholdRow.visibility = if (audio) View.VISIBLE else View.GONE
+        paletteShiftRow.visibility = if (audio) View.VISIBLE else View.GONE
+        effectParametersTitle.visibility = if (speedRow.visibility == View.VISIBLE || trailRow.visibility == View.VISIBLE || beatThresholdRow.visibility == View.VISIBLE || paletteShiftRow.visibility == View.VISIBLE) View.VISIBLE else View.GONE
         videoFpsRow.visibility = View.VISIBLE
         zonesRow.visibility = if (TvUiStatePolicy.showWledZones(settings.outputMode)) View.VISIBLE else View.GONE
     }
