@@ -1,17 +1,9 @@
 package org.hyperion.audioreactive
 
 /** Physical, bounded WLED diagnostics. The caller must select exactly this MAC; nothing persists or reconfigures WLED. */
-enum class WledDiagnosticPattern(val label: String) {
-    RGBW("RGBW: червоний, зелений, синій, білий"),
-    GRADIENT("Градієнт"),
-    CHECKERBOARD("Шахівниця"),
-    STRIPES("Смуги"),
-    GRID_CORNERS("Сітка і кути"),
-    BLACK("Чорний / blackout"),
-    SINGLE_PIXEL_CHASE("Один піксель: chase"),
-    DIRECTION_CHASE("Напрямок: chase"),
-    FOUR_EDGE_COLORS("Чотири краї: кольори"),
-    CORNER_MARKERS("Маркери кутів")
+enum class WledDiagnosticPattern {
+    RGBW, GRADIENT, CHECKERBOARD, STRIPES, GRID_CORNERS, BLACK, SINGLE_PIXEL_CHASE,
+    DIRECTION_CHASE, FOUR_EDGE_COLORS, CORNER_MARKERS
 }
 
 object WledDiagnosticPackets {

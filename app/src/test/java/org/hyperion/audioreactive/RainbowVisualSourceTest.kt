@@ -26,7 +26,7 @@ class RainbowVisualSourceTest {
         assertTrue(source.contains("RainbowVisualSourcePolicy.start()"))
         assertTrue(source.contains("testButton.isEnabled = !captureAdmissionLocked"))
         assertTrue(source.contains("setOnClickListener { cycleLocalVisualPattern() }"))
-        assertTrue(source.contains("Мережевий вихід не використовується."))
+        assertTrue(source.contains("getString(R.string.local_pattern_status, label)"))
         assertFalse(source.contains("private fun runSelectedOutputTest()"))
         assertFalse(source.contains("RainbowVisualActivity"))
         assertFalse(source.contains("startActivity(Intent(this, RainbowVisualActivity::class.java))"))

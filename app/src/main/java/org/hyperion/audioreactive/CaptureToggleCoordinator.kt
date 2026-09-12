@@ -16,6 +16,9 @@ internal class CaptureToggleCoordinator(private val host: Host) {
         fun requestMediaProjectionConsent(generation: Long)
         fun prepareOutputForCapture(generation: Long, onReady: () -> Unit, onDenied: () -> Unit)
         fun startCapture(generation: Long, resultCode: Int, data: Intent)
+        /** Animation output keeps the identical preflight/one-shot route handoff but has no capture input. */
+        fun startsWithoutCaptureInputs(): Boolean = false
+        fun startNoInputAnimation(generation: Long): Unit = error("No-input animation is not enabled by this host")
         fun onStoppedExistingService()
         fun onCaptureStartDenied()
         fun onCaptureStartApproved()
@@ -31,7 +34,12 @@ internal class CaptureToggleCoordinator(private val host: Host) {
             val request = ++generation
             pendingGeneration = request
             host.prepareOutputForCapture(request,
-                onReady = { if (current(request)) dispatch(CaptureTogglePolicy.actionFor(false, host.hasRecordAudioPermission()), request) },
+                onReady = { if (current(request)) {
+                    if (host.startsWithoutCaptureInputs()) {
+                        host.startNoInputAnimation(request)
+                        host.onCaptureStartApproved()
+                    } else dispatch(CaptureTogglePolicy.actionFor(false, host.hasRecordAudioPermission()), request)
+                } },
                 onDenied = { if (current(request)) deny() },
             )
         }

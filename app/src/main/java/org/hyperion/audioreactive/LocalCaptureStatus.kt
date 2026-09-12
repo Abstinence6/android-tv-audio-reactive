@@ -2,13 +2,13 @@ package org.hyperion.audioreactive
 
 /** Process-local detailed status; never sent to a network endpoint. */
 data class LocalCaptureStatus(
-    val stage: String = "idle",
+    val captureStatus: CaptureStatus = CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT,
     val outputs: List<String> = emptyList(),
     val calibrated: List<String> = emptyList(),
     val skipped: List<String> = emptyList(),
     val frames: Long = 0,
     val fps: Float = 0f,
-    val lastSend: String = "none",
+    val lastSendSucceeded: Boolean? = null,
     val rms: Float = 0f,
     val peak: Float = 0f,
     val frameTimeMs: Float = 0f,
@@ -19,7 +19,7 @@ object LocalStatusStore {
     @Volatile private var current = LocalCaptureStatus()
     @Synchronized fun snapshot() = current
     @Synchronized fun update(value: LocalCaptureStatus) { current = value }
-    @Synchronized fun reset(stage: String = "idle") { current = LocalCaptureStatus(stage = stage) }
+    @Synchronized fun reset(status: CaptureStatus = CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT) { current = LocalCaptureStatus(captureStatus = status) }
     @Synchronized fun recordFrameTiming(elapsedNanos: Long, deadlineNanos: Long) {
         val elapsed = elapsedNanos.coerceIn(0L, MAX_FRAME_NANOS)
         val millis = elapsed / 1_000_000f

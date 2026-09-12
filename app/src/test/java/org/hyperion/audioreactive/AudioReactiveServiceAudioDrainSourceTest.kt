@@ -15,7 +15,7 @@ class AudioReactiveServiceAudioDrainSourceTest {
 
     @Test fun videoLoopDrainsToTheLatestCompletePcmBlockBeforeAnalysis() {
         assertTrue(source.contains("AudioRecordDrainPolicy.drainLatestFullBlock(samples,latestSamples)"))
-        assertTrue(source.contains("analyzer.analyze(latestSamples,latestSamples.size,s.sensitivity)"))
+        assertTrue(source.contains("analyzer.analyzeStereo(latestSamples,latestSamples.size,s.sensitivity,s.effectParameters.beatThreshold,started)"))
         assertTrue(source.contains("AudioRecord.READ_NON_BLOCKING"))
         assertFalse(source.contains("analyzer.analyze(samples,n,s.sensitivity)"))
     }

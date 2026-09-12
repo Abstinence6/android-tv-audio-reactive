@@ -25,7 +25,9 @@ class AudioFeatures(
     var beatStrength: Float = 0f,
     var beatTimestampNanos: Long = 0L,
     var tempoBpm: Float = 0f,
-    var tempoConfidence: Float = 0f
+    var tempoConfidence: Float = 0f,
+    /** -1 is fully left, +1 is fully right; mono analysis is centered at zero. */
+    var stereoBalance: Float = 0f,
 ) {
     companion object { const val BAND_COUNT = 16 }
 }
@@ -35,30 +37,30 @@ data class EffectParameters(val speed: Float = 1f, val trail: Float = .5f, val b
     fun valid() = speed in .25f..3f && trail in 0f..1f && beatThreshold in .05f.. .95f && hueShift in -180f..180f
 }
 
-enum class Effect(val label: String, val wled1dReferenceStyle: Boolean = false) {
+enum class Effect(val wled1dReferenceStyle: Boolean = false) {
     // Existing selections remain stable for persisted settings.
-    SPECTRUM("Spectrum"), PULSE("Pulse"), FIRE("Fire"), OCEAN("Ocean"), AURORA("Aurora"),
-    NEON("Neon"), SUNSET("Sunset"), FOREST("Forest"), MONOCHROME("Monochrome"), RAINBOW("Rainbow"),
-    MEL_SPECTRUM("Mel Spectrum / 16-band GEQ"), BASS_PULSE("Bass Pulse"), BASS_CHASE("Bass Chase"),
-    RUNNING_SPARKS("Running Sparks / Comet"), METEOR_TRAILS("Meteor Trails"),
-    BEAT_EXPLOSION("Beat Explosion"), EMBERS("Fire / Embers"), FIREFLIES("Fireflies / Twinkle"),
-    COLOR_WAVES("Color Waves"), THREE_BAND_RATIO("Three-band Ratio"), DYNAMIC_HUE("Dynamic Hue"),
-    COLOR_ORGAN("Color Organ"), VU_PEAK_HOLD("VU Peak Hold"), BLURZ_TRAILS("Blurz / Trails"),
-    WATERFALL("Waterfall", true), BEAT_RIPPLE("Beat Ripple"),
+    SPECTRUM, PULSE, FIRE, OCEAN, AURORA,
+    NEON, SUNSET, FOREST, MONOCHROME, RAINBOW,
+    MEL_SPECTRUM, BASS_PULSE, BASS_CHASE,
+    RUNNING_SPARKS, METEOR_TRAILS,
+    BEAT_EXPLOSION, EMBERS, FIREFLIES,
+    COLOR_WAVES, THREE_BAND_RATIO, DYNAMIC_HUE,
+    COLOR_ORGAN, VU_PEAK_HOLD, BLURZ_TRAILS,
+    WATERFALL(true), BEAT_RIPPLE,
     // Original app-side interpretations of familiar audio-reactive styles; no WLED code is used.
-    JUGGLE("Juggle"), PRISM("Prism"), BASS_GRADIENT("Bass Gradient"),
-    WAVE_BANDS("Wave Bands"), SCANNER("Scanner"), PENDULUM("Pendulum"),
-    STARFIELD("Starfield"), PLASMA("Plasma"), MUSIC_BOX("Music Box"),
-    EQUALIZER_SWEEP("Equalizer Sweep"),
+    JUGGLE, PRISM, BASS_GRADIENT,
+    WAVE_BANDS, SCANNER, PENDULUM,
+    STARFIELD, PLASMA, MUSIC_BOX,
+    EQUALIZER_SWEEP,
     // Every 1D Audio Reactive style in the WLED reference catalogue, independently implemented here.
-    RIPPLE_PEAK("Ripple Peak", true), GRAVCENTER("Gravcenter", true), GRAVCENTRIC("Gravcentric", true),
-    GRAVIMETER("Gravimeter", true), GRAVFREQ("Gravfreq", true), JUGGLES("Juggles", true),
-    MATRIPIX("Matripix", true), MIDNOISE("Midnoise", true), NOISEFIRE("Noisefire", true),
-    NOISEMETER("Noisemeter", true), PIXELWAVE("Pixelwave", true), PLASMOID("Plasmoid", true),
-    PUDDLEPEAK("Puddlepeak", true), PUDDLES("Puddles", true), PIXELS("Pixels", true),
-    BLURZ("Blurz", true), DJ_LIGHT("DJ Light", true), FREQMAP("Freqmap", true),
-    FREQMATRIX("Freqmatrix", true), FREQPIXELS("Freqpixels", true), FREQWAVE("Freqwave", true),
-    NOISEMOVE("Noisemove", true), ROCKTAVES("Rocktaves", true)
+    RIPPLE_PEAK(true), GRAVCENTER(true), GRAVCENTRIC(true),
+    GRAVIMETER(true), GRAVFREQ(true), JUGGLES(true),
+    MATRIPIX(true), MIDNOISE(true), NOISEFIRE(true),
+    NOISEMETER(true), PIXELWAVE(true), PLASMOID(true),
+    PUDDLEPEAK(true), PUDDLES(true), PIXELS(true),
+    BLURZ(true), DJ_LIGHT(true), FREQMAP(true),
+    FREQMATRIX(true), FREQPIXELS(true), FREQWAVE(true),
+    NOISEMOVE(true), ROCKTAVES(true)
 }
 
 /**
@@ -94,6 +96,7 @@ class PcmAnalyzer {
     private var tempoConfidence = 0f
     private var configuredBeatThreshold = .2f
     private var suppliedTimestampNanos = -1L
+    private var stereoMono = ShortArray(CaptureCadence.ANALYSIS_SAMPLES)
 
     fun reset() {
         bands.fill(0f); bandEnvelope.fill(0f); bandPeak.fill(MIN_BAND_PEAK); bandNoiseFloor.fill(0f)
@@ -113,8 +116,28 @@ class PcmAnalyzer {
     fun analyze(pcm: ShortArray, sensitivity: Float): AudioFeatures = analyze(pcm, pcm.size, sensitivity)
     fun analyze(pcm: ShortArray, sampleCount: Int, sensitivity: Float): AudioFeatures = analyze(pcm, sampleCount, sensitivity, configuredBeatThreshold, takeTimestamp(sampleCount))
 
+    /** Downmixes interleaved stereo for shared analysis and retains only its bounded L/R energy balance. */
+    fun analyzeStereo(interleaved: ShortArray, sampleCount: Int, sensitivity: Float, beatThreshold: Float, timestampNanos: Long): AudioFeatures {
+        val values = sampleCount.coerceIn(0, interleaved.size)
+        val frames = values / 2
+        if (frames > stereoMono.size) stereoMono = ShortArray(frames)
+        var leftEnergy = 0.0
+        var rightEnergy = 0.0
+        for (frame in 0 until frames) {
+            val left = interleaved[frame * 2].toInt()
+            val right = interleaved[frame * 2 + 1].toInt()
+            stereoMono[frame] = ((left + right) / 2).toShort()
+            leftEnergy += abs(left).toDouble()
+            rightEnergy += abs(right).toDouble()
+        }
+        val result = analyze(stereoMono, frames, sensitivity, beatThreshold, timestampNanos)
+        result.stereoBalance = if (leftEnergy + rightEnergy > 0.0) ((rightEnergy - leftEnergy) / (rightEnergy + leftEnergy)).toFloat().coerceIn(-1f, 1f) else 0f
+        return result
+    }
+
     /** The capture path supplies System.nanoTime(); tests supply deterministic monotonic timestamps. */
     fun analyze(pcm: ShortArray, sampleCount: Int, sensitivity: Float, beatThreshold: Float, timestampNanos: Long): AudioFeatures {
+        reusableFeatures.stereoBalance = 0f
         val count = sampleCount.coerceIn(0, pcm.size)
         val timestamp = timestampNanos.coerceAtLeast(analysisTimestampNanos)
         analysisTimestampNanos = timestamp

@@ -13,10 +13,10 @@ class ManifestActionExposureTest {
         "org.hyperion.audioreactive.action.ON",
         "org.hyperion.audioreactive.action.OFF",
     )
-    private val remoteActivities = mapOf(
-        ".RemoteOnActivity" to "Увімкнути Audio Reactive",
-        ".RemoteOffActivity" to "Вимкнути Audio Reactive",
-        ".RemoteToggleActivity" to "Перемкнути Audio Reactive",
+    private val remoteActivities = setOf(
+        ".RemoteOnActivity",
+        ".RemoteOffActivity",
+        ".RemoteToggleActivity",
     )
 
     @Test fun mainActivityPreservesOnlySeparateCategoryFreeCommandFilters() {
@@ -35,12 +35,15 @@ class ManifestActionExposureTest {
         }.toSet())
     }
 
-    @Test fun exactlyThreeVisibleRemoteComponentsHaveUniqueUkrainianLabelsAndNoLauncherCategories() {
+    @Test fun exactlyThreeVisibleRemoteComponentsUseLocalizedStringResourcesAndNoLauncherCategories() {
         val activities = activities()
         val remote = activities.filter { it.androidName() in remoteActivities }
         assertEquals(3, remote.size)
-        assertEquals(remoteActivities.keys, remote.map { it.androidName() }.toSet())
-        assertEquals(remoteActivities.values.toSet(), remote.map { stringValue(it.androidAttribute("label")) }.toSet())
+        assertEquals(remoteActivities, remote.map { it.androidName() }.toSet())
+        assertEquals(
+            setOf("@string/remote_command_on", "@string/remote_command_off", "@string/remote_command_toggle"),
+            remote.map { it.androidAttribute("label") }.toSet(),
+        )
         remote.forEach { activity ->
             assertEquals("true", activity.androidAttribute("exported"))
             assertTrue(children(activity, "intent-filter").isEmpty())

@@ -1,20 +1,11 @@
 package org.hyperion.audioreactive
 
 /** Public-safe capture lifecycle values for the UI. */
-enum class CaptureStatus(val uiText: String, val isActive: Boolean = false) {
-    NEEDS_MEDIA_PROJECTION_CONSENT("Idle — playback capture needs RECORD_AUDIO and user MediaProjection consent."),
-    PREPARING_PROJECTION("Preparing MediaProjection."),
-    PREPARING_AUDIO_RECORD("Preparing playback audio capture."),
-    AUDIO_RECORD_INIT_FAILED("Playback audio capture could not be initialized."),
-    AUDIO_RECORD_START_FAILED("Playback audio capture could not be started."),
-    AUDIO_RECORD_INIT_TIMEOUT("Playback audio capture initialization timed out."),
-    ROUTER_INIT_FAILED("Output routing could not be initialized."),
-    ROUTE_LOST("Output route was lost; capture stopped and outputs were cleaned up. Revalidate manually before starting again."),
-    CAPTURE_ACTIVE("Audio effects active; routes are locked until capture stops.", true),
-    CAPTURE_ACTIVE_AUDIO("Audio capture active; routes are locked.", true),
-    CAPTURE_ACTIVE_VIDEO("Video capture active; routes are locked.", true),
-    CAPTURE_ACTIVE_VIDEO_AUDIO("Audio and video capture active; routes are locked.", true),
-    VIDEO_UNAVAILABLE_OR_PROTECTED("Video is unavailable or protected.", true),
+enum class CaptureStatus(val isActive: Boolean = false) {
+    NEEDS_MEDIA_PROJECTION_CONSENT, PREPARING_PROJECTION, PREPARING_ANIMATION, PREPARING_AUDIO_RECORD,
+    AUDIO_RECORD_INIT_FAILED, AUDIO_RECORD_START_FAILED, AUDIO_RECORD_INIT_TIMEOUT, ROUTER_INIT_FAILED,
+    ROUTE_LOST, CAPTURE_ACTIVE(true), CAPTURE_ACTIVE_AUDIO(true), CAPTURE_ACTIVE_VIDEO(true),
+    CAPTURE_ACTIVE_VIDEO_AUDIO(true), CAPTURE_ACTIVE_ANIMATION(true), VIDEO_UNAVAILABLE_OR_PROTECTED(true),
 }
 
 /**

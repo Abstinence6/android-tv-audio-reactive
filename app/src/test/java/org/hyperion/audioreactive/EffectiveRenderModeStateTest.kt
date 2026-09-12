@@ -15,15 +15,15 @@ class EffectiveRenderModeStateTest {
         )
         LiveRendererSettings.begin(persisted)
         try {
-            assertEffective(RenderMode.AUDIO, persisted, "FIRE", listOf("Fire"))
+            assertEffective(RenderMode.AUDIO, persisted, "FIRE", listOf("FIRE"))
 
             assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO))
             assertTrue(LiveRendererSettings.setActiveEffect("SATURATION"))
-            assertEffective(RenderMode.VIDEO, persisted, "SATURATION", listOf("Normal", "Saturation", "Contrast"))
+            assertEffective(RenderMode.VIDEO, persisted, "SATURATION", VideoEffect.entries.map { it.name })
 
             assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
             assertTrue(LiveRendererSettings.setActiveEffect("EQ"))
-            assertEffective(RenderMode.VIDEO_AUDIO, persisted, "EQ", listOf("Brightness pulse", "Beat pulse", "EQ", "Comet", "Ripple", "Bass sweep"))
+            assertEffective(RenderMode.VIDEO_AUDIO, persisted, "EQ", VideoAudioEffect.entries.map { it.name })
 
             // The admission snapshot is never rewritten by these renderer-local transitions.
             assertEquals(RenderMode.AUDIO, persisted.renderMode)
@@ -62,7 +62,7 @@ class EffectiveRenderModeStateTest {
         val checkboxes = LiveRenderModeUiPolicy.checkboxes(mode)
         assertEquals(mode != RenderMode.VIDEO, checkboxes.audioChecked)
         assertEquals(mode != RenderMode.AUDIO, checkboxes.videoChecked)
-        assertTrue(EffectSelectorPolicy.labels(effective).containsAll(labels))
+        assertTrue(EffectSelectorPolicy.names(effective).containsAll(labels))
         val publications = MqttContract.snapshot(effective, activeRuntime())
         assertEquals(mode.name, publications.first { it.topic == MqttContract.settingStateTopic("render_mode") }.payload)
         assertEquals(activeEffect, publications.first { it.topic == MqttContract.EFFECT_STATE }.payload)

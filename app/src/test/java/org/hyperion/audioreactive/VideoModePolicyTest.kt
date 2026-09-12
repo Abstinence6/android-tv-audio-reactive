@@ -15,6 +15,14 @@ class VideoModePolicyTest {
         assertTrue(result.rejected); assertEquals(RenderMode.VIDEO, result.mode); assertTrue(result.videoChecked)
     }
 
+    @Test fun noInputAnimationIsExplicitlySelectableAndTheOnlyCheckedMode() {
+        val selected = CaptureModeCheckboxPolicy.resolve(audio = true, video = true, animation = true, previous = RenderMode.VIDEO_AUDIO)
+        assertEquals(RenderMode.ANIMATION, selected.mode)
+        assertFalse(selected.audioChecked); assertFalse(selected.videoChecked); assertTrue(selected.animationChecked); assertFalse(selected.rejected)
+        val retained = CaptureModeCheckboxPolicy.resolve(audio = false, video = false, animation = false, previous = RenderMode.ANIMATION)
+        assertEquals(RenderMode.ANIMATION, retained.mode); assertTrue(retained.animationChecked); assertTrue(retained.rejected)
+    }
+
     @Test fun selectorAlwaysUsesTheCurrentModeCatalogueAndCanonicalIndex() {
         val base = AudioSettings.defaults().copy(effect = Effect.FIRE, videoEffect = VideoEffect.CONTRAST, videoAudioEffect = VideoAudioEffect.BASS_SWEEP)
         val audio = base.copy(renderMode = RenderMode.AUDIO)
@@ -24,8 +32,8 @@ class VideoModePolicyTest {
         assertEquals(VideoEffect.CONTRAST.ordinal, EffectSelectorPolicy.selectedIndex(video))
         assertEquals(VideoAudioEffect.BASS_SWEEP.ordinal, EffectSelectorPolicy.selectedIndex(mixed))
         listOf(audio, video, mixed).forEach { settings ->
-            val labels = EffectSelectorPolicy.labels(settings)
-            assertTrue(EffectSelectorPolicy.selectedIndex(settings) in labels.indices)
+            val names = EffectSelectorPolicy.names(settings)
+            assertTrue(EffectSelectorPolicy.selectedIndex(settings) in names.indices)
         }
     }
 
@@ -39,7 +47,7 @@ class VideoModePolicyTest {
 
     @Test fun baseVideoColourTreatmentIsAvailableForVideoAndVideoAudioSeparatelyFromAudioEffects() {
         val mixed = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, videoEffect = VideoEffect.CONTRAST)
-        assertEquals(listOf("Normal", "Saturation", "Contrast"), VideoColourTreatmentPolicy.labels())
+        assertEquals(listOf("NORMAL", "SATURATION", "CONTRAST"), VideoEffect.entries.map { it.name })
         assertTrue(VideoColourTreatmentPolicy.visible(RenderMode.VIDEO))
         assertTrue(VideoColourTreatmentPolicy.visible(RenderMode.VIDEO_AUDIO))
         assertFalse(VideoColourTreatmentPolicy.visible(RenderMode.AUDIO))
@@ -47,7 +55,7 @@ class VideoModePolicyTest {
         assertEquals(VideoEffect.SATURATION, VideoColourTreatmentPolicy.selection(VideoEffect.SATURATION.ordinal))
         assertNull(VideoColourTreatmentPolicy.selection(VideoEffect.entries.size))
         assertTrue(VideoColourTreatmentPolicy.mutable(false)); assertTrue(VideoColourTreatmentPolicy.mutable(true))
-        assertEquals(listOf("Brightness pulse", "Beat pulse", "EQ", "Comet", "Ripple", "Bass sweep"), EffectSelectorPolicy.labels(mixed))
+        assertEquals(VideoAudioEffect.entries.map { it.name }, EffectSelectorPolicy.names(mixed))
     }
 
     @Test fun videoPresetsAreDistinctTreatments() {
@@ -117,6 +125,37 @@ class VideoModePolicyTest {
         for (i in 0..2) assertTrue((brightness[i].toInt() and 255) >= (silence[i].toInt() and 255))
     }
 
+    @Test fun everyVideoAudioAccentIsBoundedAndPreservesSourceRgbDirection() {
+        val processor = VideoFrameProcessor(16, 1)
+        val field = VideoFrameProcessor::class.java.getDeclaredField("video").apply { isAccessible = true }
+        (field.get(processor) as ByteArray).also { buffer ->
+            for (zone in 0 until 16) {
+                buffer[zone * 3] = 40; buffer[zone * 3 + 1] = 80; buffer[zone * 3 + 2] = 120
+            }
+        }
+        val features = AudioFeatures(.8f, .9f, .7f, .6f, .7f, .8f, FloatArray(16) { (it + 1) / 16f }, true, 4L, 1f, 1_000_000_000L, 120f, 1f, .6f)
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = .7f, audioBoost = .5f)
+        VideoAudioEffect.entries.forEach { effect ->
+            val output = processor.compose(features, base.copy(videoAudioEffect = effect), 1_100_000_000L).copyOf()
+            assertEquals(48, output.size)
+            output.forEach { assertTrue((it.toInt() and 255) in 0..255) }
+            for (zone in 0 until 16) {
+                val r = output[zone * 3].toInt() and 255; val g = output[zone * 3 + 1].toInt() and 255; val b = output[zone * 3 + 2].toInt() and 255
+                assertTrue("$effect must preserve source channel ordering", r <= g && g <= b)
+            }
+        }
+    }
+
+    @Test fun stereoAnalyzerPreservesARealLeftRightEnergyBalance() {
+        val analyzer = PcmAnalyzer()
+        val left = ShortArray(64 * 2) { index -> if (index % 2 == 0) 12_000 else 1_000 }
+        val right = ShortArray(64 * 2) { index -> if (index % 2 == 0) 1_000 else 12_000 }
+        val leftBalance = analyzer.analyzeStereo(left, left.size, 1f, .2f, 1_000_000_000L).stereoBalance
+        val rightBalance = analyzer.analyzeStereo(right, right.size, 1f, .2f, 1_100_000_000L).stereoBalance
+        assertTrue(leftBalance < 0f)
+        assertTrue(rightBalance > 0f)
+    }
+
     @Test fun liveVideoTreatmentAndSaturationChangeVideoAndVideoAudioWithoutPersisting() {
         val processor = processorWith(40, 80, 120)
         val persisted = AudioSettings.defaults().copy(brightness = 1f, videoEffect = VideoEffect.NORMAL, videoSaturationPercent = 125)
@@ -178,6 +217,7 @@ class VideoModePolicyTest {
         assertFalse(TvUiStatePolicy.showVideoControls(RenderMode.AUDIO)); assertTrue(TvUiStatePolicy.showVideoControls(RenderMode.VIDEO))
         assertFalse(TvUiStatePolicy.showVideoColourTreatment(RenderMode.AUDIO)); assertTrue(TvUiStatePolicy.showVideoColourTreatment(RenderMode.VIDEO)); assertTrue(TvUiStatePolicy.showVideoColourTreatment(RenderMode.VIDEO_AUDIO))
         assertFalse(TvUiStatePolicy.showVideoSaturation(RenderMode.AUDIO)); assertTrue(TvUiStatePolicy.showVideoSaturation(RenderMode.VIDEO)); assertTrue(TvUiStatePolicy.showVideoSaturation(RenderMode.VIDEO_AUDIO))
+        assertTrue(TvUiStatePolicy.showAnimationControls(RenderMode.ANIMATION)); assertFalse(TvUiStatePolicy.showVideoControls(RenderMode.ANIMATION)); assertFalse(TvUiStatePolicy.showAudioControls(RenderMode.ANIMATION))
     }
 
     @Test fun switchingIntoBeatPulseBaselinesRetainedBeatUntilTheNextSequence() {

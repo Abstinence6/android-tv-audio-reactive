@@ -181,6 +181,6 @@ class MqttControlService : Service(), MqttCallbackExtended {
         stopSelf()
     }
     override fun onDestroy() { stopControl(); super.onDestroy() }
-    private fun createChannel() = (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL, "Home Assistant control", NotificationManager.IMPORTANCE_LOW))
-    private fun notification() = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle("Home Assistant MQTT").setContentText("Control available; capture requires local consent.").setOngoing(true).build()
+    private fun createChannel() = (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.notification_mqtt_channel), NotificationManager.IMPORTANCE_LOW))
+    private fun notification() = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(getString(R.string.notification_mqtt_title)).setContentText(getString(R.string.notification_mqtt_text)).setOngoing(true).build()
 }

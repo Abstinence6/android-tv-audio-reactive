@@ -3,6 +3,7 @@ package org.hyperion.audioreactive
 import android.media.Image
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sin
 
 /** Fixed-buffer RGBA ImageReader downsampler and video/audio compositor. */
 class VideoFrameProcessor(private val width: Int, private val height: Int) {
@@ -34,13 +35,16 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     }
 
     fun compose(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long = System.nanoTime()): ByteArray {
-        val hasAudioAccent = features?.signalPresent == true && settings.renderMode == RenderMode.VIDEO_AUDIO
+        val silenceBreathing = settings.videoAudioEffect == VideoAudioEffect.SILENCE_BREATHING
+        val hasAudioAccent = settings.renderMode == RenderMode.VIDEO_AUDIO && (features?.signalPresent == true || silenceBreathing)
         updateBeatPulse(features, settings, timestampNanos, hasAudioAccent)
         var p = 0; var zone = 0
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
-            val gain = if (hasAudioAccent) videoAudioGain(features, settings.videoAudioEffect, zone) else 0f
-            val brightness = silenceBrightness.compose(settings, features?.signalPresent, timestampNanos) * (1f + settings.audioBoost * gain)
+            val gain = if (hasAudioAccent) videoAudioGain(features, settings.videoAudioEffect, zone, timestampNanos) else 0f
+            val silenceBase = silenceBrightness.compose(settings, features?.signalPresent, timestampNanos)
+            val breathingFloor = if (silenceBreathing && features?.signalPresent != true) SILENCE_BREATH_MIN_BRIGHTNESS else 0f
+            val brightness = max(silenceBase, breathingFloor) * (1f + settings.audioBoost * gain)
             if (settings.renderMode != RenderMode.AUDIO) {
                 val saturation = settings.videoSaturationPercent.coerceIn(VideoSaturationPolicy.MIN_PERCENT, VideoSaturationPolicy.MAX_PERCENT) / 100f
                 val average = (r + g + b) / 3f
@@ -67,13 +71,13 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     }
 
     /**
-     * Beat events are consumed once. Entering audio-active Beat Pulse baselines the retained analyzer
+     * Beat events are consumed once. Entering any beat-driven accent baselines the retained analyzer
      * event before rendering, so effect/mode activation cannot replay it. A 500 ms monotonic age bound
      * covers a 200 ms 5 FPS frame interval, a 21 ms captured block, and render scheduling while
      * rejecting stalled retained events.
      */
     private fun updateBeatPulse(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long, hasAudioAccent: Boolean) {
-        val audioActive = hasAudioAccent && settings.videoAudioEffect == VideoAudioEffect.BEAT_PULSE
+        val audioActive = hasAudioAccent && settings.videoAudioEffect.usesBeatEvents()
         if (activeVideoAudioEffect != settings.videoAudioEffect) {
             activeVideoAudioEffect = settings.videoAudioEffect
             beatPulse = 0f
@@ -111,17 +115,43 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     }
 
     /** Audio only applies a non-negative brightness accent; it never replaces source hue/chroma. */
-    private fun videoAudioGain(f: AudioFeatures?, effect: VideoAudioEffect, zone: Int): Float {
-        if (f?.signalPresent != true) return 0f
-        val band = f.bands[zone % AudioFeatures.BAND_COUNT]
+    private fun videoAudioGain(f: AudioFeatures?, effect: VideoAudioEffect, zone: Int, timestampNanos: Long): Float {
+        if (f?.signalPresent != true) return if (effect == VideoAudioEffect.SILENCE_BREATHING) {
+            (.35f + .25f * sin(timestampNanos / 1_000_000_000.0 * SILENCE_BREATH_RADIANS_PER_SECOND).toFloat()).coerceIn(0f, 1f)
+        } else 0f
+        val position = (zone % PERIMETER_ZONES) / (PERIMETER_ZONES - 1f)
+        val centred = abs(position - .5f) * 2f
+        val band = f.bands[(position * (AudioFeatures.BAND_COUNT - 1)).toInt().coerceIn(0, AudioFeatures.BAND_COUNT - 1)]
+        val comet = (f.onset * (1f - abs(position - f.onset).coerceIn(0f, 1f))).coerceIn(0f, 1f)
         return when (effect) {
             VideoAudioEffect.BRIGHTNESS_PULSE -> f.rms
             VideoAudioEffect.BEAT_PULSE -> beatPulse
             VideoAudioEffect.EQ -> band
-            VideoAudioEffect.COMET -> if (zone % 16 == ((f.onset * 15).toInt())) max(f.onset, .15f) else f.rms * .18f
-            VideoAudioEffect.RIPPLE -> max(0f, f.onset - abs((zone % 16) - 8) / 16f)
-            VideoAudioEffect.BASS_SWEEP -> f.bass * (1f - abs((zone % 16) - ((f.bass * 15).toInt())) / 16f)
+            VideoAudioEffect.COMET -> comet
+            VideoAudioEffect.RIPPLE -> (f.onset - centred * .7f).coerceAtLeast(0f)
+            VideoAudioEffect.BASS_SWEEP -> f.bass * (1f - abs(position - f.bass).coerceIn(0f, 1f))
+            VideoAudioEffect.SPECTRAL_BANDS -> band
+            VideoAudioEffect.CENTER_BEAT_BURST -> beatPulse * (1f - centred)
+            VideoAudioEffect.EDGE_PULSE -> f.onset * centred
+            VideoAudioEffect.STEREO_BALANCE -> f.rms * if (f.stereoBalance < 0f) (1f - position) * -f.stereoBalance else position * f.stereoBalance
+            VideoAudioEffect.FREQUENCY_GRADIENT -> band * (.35f + position * .65f)
+            VideoAudioEffect.BEAT_STROBE -> if (beatPulse >= BEAT_STROBE_THRESHOLD) beatPulse else 0f
+            VideoAudioEffect.COMET_TRAILS -> max(comet, f.rms * (.12f + .28f * (1f - abs(position - f.onset).coerceIn(0f, 1f))))
+            VideoAudioEffect.BASS_WAVE -> f.bass * ((sin((position - f.bass) * BASS_WAVE_CYCLES * Math.PI) + 1.0) * .5).toFloat()
+            VideoAudioEffect.VOCAL_FOCUS -> f.mid * (1f - centred * .7f)
+            VideoAudioEffect.SILENCE_BREATHING -> f.rms
+            VideoAudioEffect.ADAPTIVE_SHIMMER -> f.treble * (.35f + .65f * ((sin(position * SHIMMER_CYCLES * Math.PI + timestampNanos / 1_000_000_000.0 * SHIMMER_RADIANS_PER_SECOND) + 1.0) * .5f).toFloat())
+            // Source RGB is deliberately preserved: this is a warm-to-cool spatial brightness emphasis, not a colour rewrite.
+            VideoAudioEffect.BEAT_COLOUR_TEMPERATURE -> beatPulse * (.4f + position * .6f)
         }.coerceIn(0f, 1f)
+    }
+
+    private fun VideoAudioEffect.usesBeatEvents() = when (this) {
+        VideoAudioEffect.BEAT_PULSE,
+        VideoAudioEffect.CENTER_BEAT_BURST,
+        VideoAudioEffect.BEAT_STROBE,
+        VideoAudioEffect.BEAT_COLOUR_TEMPERATURE -> true
+        else -> false
     }
 
     companion object {
@@ -130,6 +160,13 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         const val PULSE_STRENGTH_RANGE = .78f
         const val DEFAULT_PULSE_DECAY_MILLIS = 420f
         const val MAX_BEAT_EVENT_AGE_NANOS = 500_000_000L
+        const val PERIMETER_ZONES = 16
+        const val SILENCE_BREATH_MIN_BRIGHTNESS = .08f
+        const val SILENCE_BREATH_RADIANS_PER_SECOND = .8
+        const val BEAT_STROBE_THRESHOLD = .35f
+        const val BASS_WAVE_CYCLES = 2f
+        const val SHIMMER_CYCLES = 8f
+        const val SHIMMER_RADIANS_PER_SECOND = 9.0
     }
 }
 
@@ -145,15 +182,18 @@ object VideoSaturationPolicy {
 /** A protected or sustained-black image must clear the last displayed output before capture ends. */
 internal object VideoCaptureFailurePolicy { fun blackoutAndTerminate(stopRoute: () -> Unit) = stopRoute() }
 object CaptureModeCheckboxPolicy {
-    data class Result(val mode: RenderMode, val audioChecked: Boolean, val videoChecked: Boolean, val rejected: Boolean)
-    fun resolve(audio: Boolean, video: Boolean, previous: RenderMode): Result = when {
-        audio && video -> Result(RenderMode.VIDEO_AUDIO, true, true, false)
-        audio -> Result(RenderMode.AUDIO, true, false, false)
-        video -> Result(RenderMode.VIDEO, false, true, false)
+    data class Result(val mode: RenderMode, val audioChecked: Boolean, val videoChecked: Boolean, val animationChecked: Boolean = false, val rejected: Boolean)
+    fun resolve(audio: Boolean, video: Boolean, previous: RenderMode): Result = resolve(audio, video, false, previous)
+    fun resolve(audio: Boolean, video: Boolean, animation: Boolean, previous: RenderMode): Result = when {
+        animation -> Result(RenderMode.ANIMATION, false, false, true, false)
+        audio && video -> Result(RenderMode.VIDEO_AUDIO, true, true, false, false)
+        audio -> Result(RenderMode.AUDIO, true, false, false, false)
+        video -> Result(RenderMode.VIDEO, false, true, false, false)
         else -> when (previous) {
-            RenderMode.AUDIO -> Result(previous, true, false, true)
-            RenderMode.VIDEO -> Result(previous, false, true, true)
-            RenderMode.VIDEO_AUDIO -> Result(previous, true, true, true)
+            RenderMode.AUDIO -> Result(previous, true, false, false, true)
+            RenderMode.VIDEO -> Result(previous, false, true, false, true)
+            RenderMode.VIDEO_AUDIO -> Result(previous, true, true, false, true)
+            RenderMode.ANIMATION -> Result(RenderMode.ANIMATION, false, false, true, true)
         }
     }
 }
@@ -169,8 +209,11 @@ object RainbowVisualSourcePolicy {
     fun mayUseNetwork() = false
 }
 object TvUiStatePolicy {
-    fun showVideoControls(mode: RenderMode): Boolean = mode != RenderMode.AUDIO
-    fun showVideoColourTreatment(mode: RenderMode): Boolean = VideoColourTreatmentPolicy.visible(mode)
-    fun showVideoSaturation(mode: RenderMode): Boolean = mode != RenderMode.AUDIO
+    fun showVideoControls(mode: RenderMode): Boolean = mode == RenderMode.VIDEO || mode == RenderMode.VIDEO_AUDIO
+    fun showAudioControls(mode: RenderMode): Boolean = mode == RenderMode.AUDIO || mode == RenderMode.VIDEO_AUDIO
+    fun showVideoAudioControls(mode: RenderMode): Boolean = mode == RenderMode.VIDEO_AUDIO
+    fun showAnimationControls(mode: RenderMode): Boolean = mode == RenderMode.ANIMATION
+    fun showVideoColourTreatment(mode: RenderMode): Boolean = mode == RenderMode.VIDEO || mode == RenderMode.VIDEO_AUDIO
+    fun showVideoSaturation(mode: RenderMode): Boolean = mode == RenderMode.VIDEO || mode == RenderMode.VIDEO_AUDIO
     fun showWledZones(output: OutputMode): Boolean = output == OutputMode.WLED
 }

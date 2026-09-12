@@ -16,7 +16,7 @@ class CapturePreflightMainActivitySourceTest {
         assertTrue(source.contains("WledRouteBindings.discard(pendingWled); HyperionRouteBindings.discard(pendingHyperion)"))
         assertTrue(source.contains("captureAdmissionLocked = true"))
         assertTrue(source.contains("val locked = active || captureAdmissionLocked"))
-        assertTrue(source.contains("спроба ${'$'}attempt/${'$'}{CapturePreflightRetry.MAX_ATTEMPTS}"))
+        assertTrue(source.contains("getString(R.string.preflight_attempt"))
     }
 
     @Test fun callbacksAreBoundToAdmissionGenerationAndStaleResultsCannotStartService() {
@@ -41,7 +41,7 @@ class CapturePreflightMainActivitySourceTest {
         assertTrue(source.contains("setOnClickListener { cycleLocalVisualPattern() }"))
         assertTrue(source.contains("private fun cycleLocalVisualPattern()"))
         assertTrue(source.contains("private fun showLocalVisualPattern(pattern: LocalVisualPattern)"))
-        assertTrue(source.contains("Мережевий вихід не використовується."))
+        assertTrue(source.contains("getString(R.string.local_pattern_status, label)"))
         assertFalse(source.contains("diagnosticPatternSpinner = Spinner(this)"))
         assertFalse(source.contains("outputTestButton = Button(this)"))
         assertFalse(source.contains("private fun runSelectedOutputTest()"))

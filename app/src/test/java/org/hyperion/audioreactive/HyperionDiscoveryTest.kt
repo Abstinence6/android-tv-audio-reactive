@@ -62,7 +62,7 @@ class HyperionDiscoveryTest {
 
     @Test fun uiOrderAndExclusiveUncheckedRestoreAreStatic() {
         assertEquals(listOf("toggle", "capture-mode", "effects", "outputs", "discovery", "settings"), OutputUiPolicy.sections)
-        assertEquals("Увімкнути", OutputUiPolicy.ENABLE); assertEquals("Вимкнути", OutputUiPolicy.DISABLE)
+
         assertEquals(OutputMode.WLED, OutputUiPolicy.modeAfterToggle(OutputMode.WLED, OutputMode.WLED, false))
         assertEquals(OutputMode.HYPERION, OutputUiPolicy.modeAfterToggle(OutputMode.WLED, OutputMode.HYPERION, true))
     }

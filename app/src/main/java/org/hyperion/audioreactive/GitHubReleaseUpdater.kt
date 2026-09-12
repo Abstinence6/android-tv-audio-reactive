@@ -106,9 +106,9 @@ class GitHubReleaseUpdater(
                     { release ->
                         selectedRelease = release
                         if (release == null) publish("", false)
-                        else { publish("Оновлення доступне.", false); onUpdateAvailable() }
+                        else { publish(context.getString(R.string.update_found), false); onUpdateAvailable() }
                     },
-                    { publish("Не вдалося перевірити оновлення.", false) },
+                    { publish(context.getString(R.string.update_check_failed), false) },
                 )
             }
         }
@@ -116,13 +116,13 @@ class GitHubReleaseUpdater(
 
     /** Called only after the visible launch-time confirmation; it never silently installs. */
     fun updateSelectedRelease() {
-        val release = selectedRelease ?: run { publish("Спочатку перевірте оновлення.", false); return }
+        val release = selectedRelease ?: run { publish(context.getString(R.string.update_check_first), false); return }
         val cached = downloadedApk
         if (cached != null) {
             openVerifiedUpdate(cached, release.tag)
             return
         }
-        publish("Завантажую та перевіряю оновлення…", true)
+        publish(context.getString(R.string.update_downloading), true)
         executor.execute {
             val result = runCatching { downloadAndVerify(release) }
             deliver {
@@ -131,7 +131,7 @@ class GitHubReleaseUpdater(
                         downloadedApk = apk
                         openVerifiedUpdate(apk, release.tag)
                     },
-                    { publish("Не вдалося завантажити або перевірити оновлення.", false) },
+                    { publish(context.getString(R.string.update_download_failed), false) },
                 )
             }
         }
@@ -149,19 +149,19 @@ class GitHubReleaseUpdater(
     /** Rechecks the retained archive immediately before opening Android's system installer. */
     private fun openVerifiedUpdate(apk: File, tag: String) {
         if (!verifyArchive(apk, tag)) {
-            publish("Завантажене оновлення не пройшло перевірку.", false)
+            publish(context.getString(R.string.update_verification_failed), false)
             apk.delete(); downloadedApk = null
             return
         }
         if (!context.packageManager.canRequestPackageInstalls()) {
             awaitingInstallPermission = true
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            publish("Дозвольте встановлення з цього застосунку. Оновлення перевірено й збережено; після повернення відкриється системне підтвердження.", false)
+            publish(context.getString(R.string.update_allow_install), false)
             return
         }
         when (runCatching { openPackageInstaller(apk) }.getOrDefault(false)) {
-            true -> publish("Відкрито системне підтвердження встановлення.", false)
-            false -> publish("Не знайдено єдиного системного встановлювача Android; оновлення не відкрито.", false)
+            true -> publish(context.getString(R.string.update_installer_opened), false)
+            false -> publish(context.getString(R.string.update_installer_missing), false)
         }
     }
 

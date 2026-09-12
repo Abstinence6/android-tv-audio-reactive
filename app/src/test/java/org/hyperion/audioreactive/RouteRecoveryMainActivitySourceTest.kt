@@ -17,7 +17,7 @@ class RouteRecoveryMainActivitySourceTest {
         assertTrue(source.contains("RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON"))
         assertTrue(source.contains("RouteRecoveryPolicy.Origin.REMOTE_ACTION"))
         assertTrue(source.contains("RouteRecoveryPolicy.Decision.REQUIRE_LOCAL_BUTTON"))
-        assertTrue(source.contains("Вихід втрачено. Повторіть спробу локально кнопкою захоплення."))
+        assertTrue(source.contains("getString(R.string.route_lost_local)"))
     }
 
     @Test fun remoteRouteLossPathDoesNotInvokeTheCaptureCoordinator() {

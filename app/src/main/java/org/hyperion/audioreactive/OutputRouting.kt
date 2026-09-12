@@ -1,5 +1,6 @@
 package org.hyperion.audioreactive
 
+import android.content.Context
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -63,12 +64,12 @@ internal object HyperionCapturePreflight {
     }
 }
 
-enum class OutputMode(val label: String) { HYPERION("Hyperion"), WLED("WLED") }
+enum class OutputMode { HYPERION, WLED }
 
 object SliderFormatters {
-    fun sensitivity(value: Float) = String.format(java.util.Locale.US, "%.2f×", value)
-    fun brightness(value: Float) = "${(value * 100f).toInt()}%"
-    fun fps(value: Int) = "$value fps"
+    fun sensitivity(context: Context, value: Float) = context.getString(R.string.format_multiplier, value)
+    fun brightness(context: Context, value: Float) = context.getString(R.string.format_percent, (value * 100f).toInt())
+    fun fps(context: Context, value: Int) = context.getString(R.string.format_fps, value)
 }
 
 internal interface HyperionOutput { fun register(); fun send(frame: ByteArray); fun clear(); fun close() }

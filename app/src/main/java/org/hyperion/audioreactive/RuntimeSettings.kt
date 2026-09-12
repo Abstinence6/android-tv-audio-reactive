@@ -12,8 +12,8 @@ data class MqttBrokerSettings(val ip: String, val port: Int, val username: Strin
         fun defaults() = MqttBrokerSettings("192.168.1.1", 1883, "", "")
         fun fromInput(ip: String, port: String, username: String, password: String): Validation {
             val normalizedUsername = username.trim()
-            val settings = MqttBrokerSettings(ip, port.toIntOrNull() ?: return Validation(null, "Порт має бути числом від 1 до 65535."), normalizedUsername, if (normalizedUsername.isEmpty()) "" else password)
-            return if (settings.valid()) Validation(settings, null) else Validation(null, "Вкажіть лише приватну IPv4-адресу RFC1918 і порт 1–65535.")
+            val settings = MqttBrokerSettings(ip, port.toIntOrNull() ?: return Validation(null, ValidationError.INVALID_PORT), normalizedUsername, if (normalizedUsername.isEmpty()) "" else password)
+            return if (settings.valid()) Validation(settings, null) else Validation(null, ValidationError.INVALID_BROKER)
         }
 
         private fun validPrivateIpv4(value: String): Boolean {
@@ -25,7 +25,9 @@ data class MqttBrokerSettings(val ip: String, val port: Int, val username: Strin
         }
     }
 
-    data class Validation(val settings: MqttBrokerSettings?, val error: String?)
+    /** Stable validation reason; the Android UI maps it to the current locale. */
+    enum class ValidationError { INVALID_PORT, INVALID_BROKER }
+    data class Validation(val settings: MqttBrokerSettings?, val error: ValidationError?)
 }
 
 data class MqttClientOptions(val username: String?, val password: CharArray?)
@@ -47,17 +49,10 @@ object MqttClientPolicy {
     }
 }
 
-enum class RenderMode(val label: String) { AUDIO("Аудіо"), VIDEO("Відео"), VIDEO_AUDIO("Аудіо+відео") }
-enum class VideoQuality(val width: Int, val height: Int, val label: String) {
-    VERY_LOW(64, 36, "Дуже низька — 64×36 RGB24"),
-    ECONOMY(80, 45, "Економна — 80×45 RGB24"),
-    LOW(96, 54, "Низька — 96×54 RGB24"),
-    BALANCED(112, 63, "Збалансована — 112×63 RGB24"),
-    STANDARD(128, 72, "Стандартна — 128×72 RGB24"),
-    HIGH(160, 90, "Висока — 160×90 RGB24"),
-    VERY_HIGH(192, 108, "Дуже висока — 192×108 RGB24"),
-    ULTRA(256, 144, "Ультра — 256×144 RGB24"),
-    MAXIMUM(320, 180, "Максимальна — 320×180 RGB24");
+enum class RenderMode { AUDIO, VIDEO, VIDEO_AUDIO, ANIMATION }
+enum class VideoQuality(val width: Int, val height: Int) {
+    VERY_LOW(64, 36), ECONOMY(80, 45), LOW(96, 54), BALANCED(112, 63), STANDARD(128, 72),
+    HIGH(160, 90), VERY_HIGH(192, 108), ULTRA(256, 144), MAXIMUM(320, 180);
     companion object { fun safe(value: String?) = entries.firstOrNull { it.name == value } ?: STANDARD }
 }
 object VideoCapturePolicy {
@@ -90,6 +85,9 @@ data class AudioSettings(
     val wledCalibrations: List<WledScreenCalibration> = emptyList(),
     val videoEffect: VideoEffect = VideoEffect.NORMAL,
     val videoAudioEffect: VideoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE,
+    /** No-input animation selection is independent from all capture-mode catalogues. */
+    val animationEffect: AnimationEffect = AnimationEffect.WATER,
+    val animationColour: AnimationColour = AnimationColour.AUTO,
     /** Video saturation control: 0..200%, default 125%. */
     val videoSaturationPercent: Int = VideoSaturationPolicy.DEFAULT_PERCENT,
     val mqttBroker: MqttBrokerSettings = MqttBrokerSettings.defaults(),
@@ -104,8 +102,9 @@ data class AudioSettings(
     fun selectedHyperionDevice() = hyperionDevices.firstOrNull { it.identity == selectedHyperionIdentity }
     fun hasSelectedWledDestinations() = selectedWledDevices().isNotEmpty()
     fun calibrationFor(device: WledDevice) = wledCalibrations.firstOrNull { it.identity == device.identity }
-    fun requiresAudio() = renderMode != RenderMode.VIDEO
-    fun requiresVideo() = renderMode != RenderMode.AUDIO
+    fun isNoInputAnimation() = renderMode == RenderMode.ANIMATION
+    fun requiresAudio() = renderMode == RenderMode.AUDIO || renderMode == RenderMode.VIDEO_AUDIO
+    fun requiresVideo() = renderMode == RenderMode.VIDEO || renderMode == RenderMode.VIDEO_AUDIO
     /** Hyperion receives the native capture frame; WLED is reduced to its bounded source zones. */
     fun sourceFrame() = VideoCapturePolicy.sourceFrame(renderMode, videoQuality, fps)
     fun captureFrame() = if (outputMode == OutputMode.WLED && !requiresVideo()) SourceFrameSpec(wledSourceZones, 1, fps) else sourceFrame()
@@ -129,8 +128,8 @@ object OutputModeMigration { fun fromLegacyIds(ids:String?)=if(ids?.split(',')?.
 
 class SharedPreferencesAudioSettingsStore(context: Context): AudioSettingsStore {
  private val preferences=context.applicationContext.getSharedPreferences(PREFERENCES,Context.MODE_PRIVATE)
- override fun load():AudioSettings?=try { val effect=preferences.getString(EFFECT,null)?.let { n->Effect.entries.firstOrNull { it.name==n } }?:return null; val output=OutputMode.entries.firstOrNull { it.name==preferences.getString(MODE,null) }?:OutputModeMigration.fromLegacyIds(preferences.getString(OUTPUTS,null)); val mode=RenderMode.entries.firstOrNull { it.name==preferences.getString(RENDER_MODE,null) }?:RenderMode.AUDIO; val unifiedFps=preferences.getInt(FPS,preferences.getInt(VIDEO_FPS,20)); val wled=decodeWled(preferences.getString(WLED_DEVICES,"")); val hyperion=decodeHyperion(preferences.getString(HYPERION_DEVICES,"")); val broker=MqttBrokerSettings.fromInput(preferences.getString(MQTT_IP,MqttBrokerSettings.defaults().ip).orEmpty(),preferences.getInt(MQTT_PORT,MqttBrokerSettings.defaults().port).toString(),preferences.getString(MQTT_USERNAME,"").orEmpty(),preferences.getString(MQTT_PASSWORD,"").orEmpty()).settings?:return null; AudioSettings(effect,preferences.getFloat(BRIGHTNESS,Float.NaN),preferences.getFloat(SENSITIVITY,Float.NaN),unifiedFps,output,wled,preferences.getStringSet(WLED_SELECTED,emptySet())?.toSet()?:emptySet(),hyperion,preferences.getString(HYPERION_SELECTED,null),mode,VideoQuality.safe(preferences.getString(VIDEO_QUALITY,null)),unifiedFps,preferences.getFloat(AUDIO_BOOST,.35f),preferences.getInt(WLED_ZONES,128).coerceIn(16,512).let { it-it%16 },decodeEffectParameters(preferences.getString(EFFECT_PARAMS,null)),decodeCalibrations(preferences.getString(WLED_CALIBRATIONS,"")),VideoEffect.entries.firstOrNull{it.name==preferences.getString(VIDEO_EFFECT,null)}?:VideoEffect.NORMAL,VideoAudioEffect.entries.firstOrNull{it.name==preferences.getString(VIDEO_AUDIO_EFFECT,null)}?:VideoAudioEffect.BRIGHTNESS_PULSE,preferences.getInt(VIDEO_SATURATION,125).coerceIn(0,200),broker,preferences.getFloat(VIDEO_AUDIO_SILENCE_FLOOR,0f),preferences.getInt(SILENCE_HOLD_MILLIS,500),preferences.getInt(SILENCE_FADE_MILLIS,500)).takeIf { it.valid() } } catch(_:ClassCastException){null}
- override fun save(s:AudioSettings) { require(s.valid()); check(preferences.edit().putString(EFFECT,s.effect.name).putFloat(BRIGHTNESS,s.brightness).putFloat(SENSITIVITY,s.sensitivity).putInt(FPS,s.fps).putString(MODE,s.outputMode.name).putString(RENDER_MODE,s.renderMode.name).putString(VIDEO_QUALITY,s.videoQuality.name).putString(VIDEO_EFFECT,s.videoEffect.name).putString(VIDEO_AUDIO_EFFECT,s.videoAudioEffect.name).putInt(VIDEO_SATURATION,s.videoSaturationPercent).putString(MQTT_IP,s.mqttBroker.ip).putInt(MQTT_PORT,s.mqttBroker.port).putString(MQTT_USERNAME,s.mqttBroker.username).putString(MQTT_PASSWORD,s.mqttBroker.password).putFloat(VIDEO_AUDIO_SILENCE_FLOOR,s.videoAudioSilenceBrightnessFloor).putInt(SILENCE_HOLD_MILLIS,s.silenceHoldMillis).putInt(SILENCE_FADE_MILLIS,s.silenceFadeMillis).remove(VIDEO_FPS).putFloat(AUDIO_BOOST,s.audioBoost).putInt(WLED_ZONES,s.wledSourceZones).putString(EFFECT_PARAMS,encodeEffectParameters(s.effectParameters)).putString(WLED_CALIBRATIONS,encodeCalibrations(s.wledCalibrations)).putString(WLED_DEVICES,encodeWled(s.wledDevices)).putStringSet(WLED_SELECTED,s.selectedWledIdentities).putString(HYPERION_DEVICES,encodeHyperion(s.hyperionDevices)).apply { if(s.selectedHyperionIdentity==null) remove(HYPERION_SELECTED) else putString(HYPERION_SELECTED,s.selectedHyperionIdentity) }.remove(OUTPUTS).commit()) }
+ override fun load():AudioSettings?=try { val effect=preferences.getString(EFFECT,null)?.let { n->Effect.entries.firstOrNull { it.name==n } }?:return null; val output=OutputMode.entries.firstOrNull { it.name==preferences.getString(MODE,null) }?:OutputModeMigration.fromLegacyIds(preferences.getString(OUTPUTS,null)); val mode=RenderMode.entries.firstOrNull { it.name==preferences.getString(RENDER_MODE,null) }?:RenderMode.AUDIO; val unifiedFps=preferences.getInt(FPS,preferences.getInt(VIDEO_FPS,20)); val wled=decodeWled(preferences.getString(WLED_DEVICES,"")); val hyperion=decodeHyperion(preferences.getString(HYPERION_DEVICES,"")); val broker=MqttBrokerSettings.fromInput(preferences.getString(MQTT_IP,MqttBrokerSettings.defaults().ip).orEmpty(),preferences.getInt(MQTT_PORT,MqttBrokerSettings.defaults().port).toString(),preferences.getString(MQTT_USERNAME,"").orEmpty(),preferences.getString(MQTT_PASSWORD,"").orEmpty()).settings?:return null; AudioSettings(effect,preferences.getFloat(BRIGHTNESS,Float.NaN),preferences.getFloat(SENSITIVITY,Float.NaN),unifiedFps,output,wled,preferences.getStringSet(WLED_SELECTED,emptySet())?.toSet()?:emptySet(),hyperion,preferences.getString(HYPERION_SELECTED,null),mode,VideoQuality.safe(preferences.getString(VIDEO_QUALITY,null)),unifiedFps,preferences.getFloat(AUDIO_BOOST,.35f),preferences.getInt(WLED_ZONES,128).coerceIn(16,512).let { it-it%16 },decodeEffectParameters(preferences.getString(EFFECT_PARAMS,null)),decodeCalibrations(preferences.getString(WLED_CALIBRATIONS,"")),VideoEffect.entries.firstOrNull{it.name==preferences.getString(VIDEO_EFFECT,null)}?:VideoEffect.NORMAL,VideoAudioEffect.entries.firstOrNull{it.name==preferences.getString(VIDEO_AUDIO_EFFECT,null)}?:VideoAudioEffect.BRIGHTNESS_PULSE,AnimationEffect.entries.firstOrNull{it.name==preferences.getString(ANIMATION_EFFECT,null)}?:AnimationEffect.WATER,AnimationColour.entries.firstOrNull{it.name==preferences.getString(ANIMATION_COLOUR,null)}?:AnimationColour.AUTO,preferences.getInt(VIDEO_SATURATION,125).coerceIn(0,200),broker,preferences.getFloat(VIDEO_AUDIO_SILENCE_FLOOR,0f),preferences.getInt(SILENCE_HOLD_MILLIS,500),preferences.getInt(SILENCE_FADE_MILLIS,500)).takeIf { it.valid() } } catch(_:ClassCastException){null}
+ override fun save(s:AudioSettings) { require(s.valid()); check(preferences.edit().putString(EFFECT,s.effect.name).putFloat(BRIGHTNESS,s.brightness).putFloat(SENSITIVITY,s.sensitivity).putInt(FPS,s.fps).putString(MODE,s.outputMode.name).putString(RENDER_MODE,s.renderMode.name).putString(VIDEO_QUALITY,s.videoQuality.name).putString(VIDEO_EFFECT,s.videoEffect.name).putString(VIDEO_AUDIO_EFFECT,s.videoAudioEffect.name).putString(ANIMATION_EFFECT,s.animationEffect.name).putString(ANIMATION_COLOUR,s.animationColour.name).putInt(VIDEO_SATURATION,s.videoSaturationPercent).putString(MQTT_IP,s.mqttBroker.ip).putInt(MQTT_PORT,s.mqttBroker.port).putString(MQTT_USERNAME,s.mqttBroker.username).putString(MQTT_PASSWORD,s.mqttBroker.password).putFloat(VIDEO_AUDIO_SILENCE_FLOOR,s.videoAudioSilenceBrightnessFloor).putInt(SILENCE_HOLD_MILLIS,s.silenceHoldMillis).putInt(SILENCE_FADE_MILLIS,s.silenceFadeMillis).remove(VIDEO_FPS).putFloat(AUDIO_BOOST,s.audioBoost).putInt(WLED_ZONES,s.wledSourceZones).putString(EFFECT_PARAMS,encodeEffectParameters(s.effectParameters)).putString(WLED_CALIBRATIONS,encodeCalibrations(s.wledCalibrations)).putString(WLED_DEVICES,encodeWled(s.wledDevices)).putStringSet(WLED_SELECTED,s.selectedWledIdentities).putString(HYPERION_DEVICES,encodeHyperion(s.hyperionDevices)).apply { if(s.selectedHyperionIdentity==null) remove(HYPERION_SELECTED) else putString(HYPERION_SELECTED,s.selectedHyperionIdentity) }.remove(OUTPUTS).commit()) }
  private fun encoded(fields:List<String>)=fields.joinToString("|"){Base64.encodeToString(it.encodeToByteArray(),Base64.URL_SAFE or Base64.NO_WRAP)}
  private fun decoded(item:String)=item.split('|').mapNotNull { runCatching { Base64.decode(it,Base64.URL_SAFE).decodeToString() }.getOrNull() }
  private fun encodeWled(items:List<WledDevice>)=items.joinToString(";"){encoded(listOf(it.identity,it.name,it.host,it.leds.toString(),it.realtimePort.toString()))}
@@ -142,7 +141,7 @@ class SharedPreferencesAudioSettingsStore(context: Context): AudioSettingsStore 
  private fun encodeCalibrations(items:List<WledScreenCalibration>)=items.joinToString(";"){ c->encoded(listOf(c.identity,c.physicalLedCount.toString(),c.startPixel.toString(),c.direction.name,c.bottom.toString(),c.right.toString(),c.top.toString(),c.left.toString(),c.bottomInsetPercent.toString(),c.rightInsetPercent.toString(),c.topInsetPercent.toString(),c.leftInsetPercent.toString(),c.depthPercent.toString(),c.samplesPerEdge.toString(),c.gamma.toString(),c.brightnessLimit.toString())) }
  /** v1 used a shared inset; retain it as all four edges on read, then save v2. */
  private fun decodeCalibrations(raw:String?)=raw.orEmpty().split(';').filter(String::isNotBlank).mapNotNull { val f=decoded(it); val sharedInset=f.getOrNull(8)?.toIntOrNull()?:-1; val c=when(f.size) { 16 -> WledScreenCalibration(f[0],f[1].toIntOrNull()?:-1,f[2].toIntOrNull()?:-1,PerimeterDirection.entries.firstOrNull{d->d.name==f[3]}?:PerimeterDirection.CW,f[4].toIntOrNull()?:-1,f[5].toIntOrNull()?:-1,f[6].toIntOrNull()?:-1,f[7].toIntOrNull()?:-1,sharedInset,f[9].toIntOrNull()?:-1,f[10].toIntOrNull()?:-1,f[11].toIntOrNull()?:-1,f[12].toIntOrNull()?:-1,f[13].toIntOrNull()?:-1,f[14].toFloatOrNull()?:Float.NaN,f[15].toFloatOrNull()?:Float.NaN); 13 -> WledScreenCalibration(f[0],f[1].toIntOrNull()?:-1,f[2].toIntOrNull()?:-1,PerimeterDirection.entries.firstOrNull{d->d.name==f[3]}?:PerimeterDirection.CW,f[4].toIntOrNull()?:-1,f[5].toIntOrNull()?:-1,f[6].toIntOrNull()?:-1,f[7].toIntOrNull()?:-1,sharedInset,sharedInset,sharedInset,sharedInset,f[9].toIntOrNull()?:-1,f[10].toIntOrNull()?:-1,f[11].toFloatOrNull()?:Float.NaN,f[12].toFloatOrNull()?:Float.NaN); else -> null }; c?.takeIf(WledScreenCalibration::validFor) }.distinctBy { it.identity }.take(64)
- private companion object { const val PREFERENCES="audio_reactive_preferences"; const val EFFECT="effect"; const val BRIGHTNESS="brightness"; const val SENSITIVITY="sensitivity"; const val FPS="fps"; const val OUTPUTS="output_target_ids"; const val MODE="output_mode"; const val WLED_DEVICES="validated_wled_devices_v1"; const val WLED_SELECTED="selected_wled_identities_v1"; const val HYPERION_DEVICES="validated_hyperion_devices_v1"; const val HYPERION_SELECTED="selected_hyperion_identity_v1"; const val RENDER_MODE="render_mode_v2"; const val VIDEO_QUALITY="video_quality_v2"; const val VIDEO_FPS="video_fps_v2"; const val VIDEO_EFFECT="video_effect_v3"; const val VIDEO_AUDIO_EFFECT="video_audio_effect_v3"; const val VIDEO_SATURATION="video_saturation_v4"; const val AUDIO_BOOST="audio_boost_v2"; const val WLED_ZONES="wled_source_zones_v2"; const val EFFECT_PARAMS="effect_parameters_v1"; const val WLED_CALIBRATIONS="wled_screen_calibration_v1"; const val MQTT_IP="mqtt_broker_ip_v1"; const val MQTT_PORT="mqtt_broker_port_v1"; const val MQTT_USERNAME="mqtt_broker_username_v1"; const val MQTT_PASSWORD="mqtt_broker_password_v1"; const val VIDEO_AUDIO_SILENCE_FLOOR="video_audio_silence_brightness_floor_v1"; const val SILENCE_HOLD_MILLIS="silence_hold_millis_v1"; const val SILENCE_FADE_MILLIS="silence_fade_millis_v1" }
+ private companion object { const val PREFERENCES="audio_reactive_preferences"; const val EFFECT="effect"; const val BRIGHTNESS="brightness"; const val SENSITIVITY="sensitivity"; const val FPS="fps"; const val OUTPUTS="output_target_ids"; const val MODE="output_mode"; const val WLED_DEVICES="validated_wled_devices_v1"; const val WLED_SELECTED="selected_wled_identities_v1"; const val HYPERION_DEVICES="validated_hyperion_devices_v1"; const val HYPERION_SELECTED="selected_hyperion_identity_v1"; const val RENDER_MODE="render_mode_v2"; const val VIDEO_QUALITY="video_quality_v2"; const val VIDEO_FPS="video_fps_v2"; const val VIDEO_EFFECT="video_effect_v3"; const val VIDEO_AUDIO_EFFECT="video_audio_effect_v3"; const val ANIMATION_EFFECT="animation_effect_v1"; const val ANIMATION_COLOUR="animation_colour_v1"; const val VIDEO_SATURATION="video_saturation_v4"; const val AUDIO_BOOST="audio_boost_v2"; const val WLED_ZONES="wled_source_zones_v2"; const val EFFECT_PARAMS="effect_parameters_v1"; const val WLED_CALIBRATIONS="wled_screen_calibration_v1"; const val MQTT_IP="mqtt_broker_ip_v1"; const val MQTT_PORT="mqtt_broker_port_v1"; const val MQTT_USERNAME="mqtt_broker_username_v1"; const val MQTT_PASSWORD="mqtt_broker_password_v1"; const val VIDEO_AUDIO_SILENCE_FLOOR="video_audio_silence_brightness_floor_v1"; const val SILENCE_HOLD_MILLIS="silence_hold_millis_v1"; const val SILENCE_FADE_MILLIS="silence_fade_millis_v1" }
 }
 object RuntimeSettings {
     private object Defaults: AudioSettingsStore { override fun load() = null; override fun save(settings: AudioSettings) = Unit }

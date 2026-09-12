@@ -42,8 +42,6 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Labels and tab contract shared with pure UI-policy tests. */
 object OutputUiPolicy {
-    const val ENABLE = "Увімкнути"
-    const val DISABLE = "Вимкнути"
     val sections = listOf("toggle", "capture-mode", "effects", "outputs", "discovery", "settings")
     fun modeAfterToggle(current: OutputMode, clicked: OutputMode, checked: Boolean) = if (checked) clicked else current
     fun handlesCheckboxChange(synchronizing: Boolean) = !synchronizing
@@ -51,47 +49,33 @@ object OutputUiPolicy {
 
 /** Short, stable TV-facing summary; detailed diagnostics stay behind the local status action. */
 object CaptureUiPresentation {
-    fun indicator(status: CaptureStatus, mode: RenderMode): String =
-        "Захоплення: ${stateLabel(status)} · Режим: ${modeLabel(mode)}"
+    fun indicator(context: Context, status: CaptureStatus, mode: RenderMode): String =
+        context.getString(R.string.capture_indicator, context.getString(stateLabel(status)), UiStrings.renderMode(context, mode))
 
-    private fun stateLabel(status: CaptureStatus) = when (status) {
-        CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT -> "Готово"
-        CaptureStatus.PREPARING_PROJECTION, CaptureStatus.PREPARING_AUDIO_RECORD -> "Підготовка"
-        CaptureStatus.ROUTE_LOST -> "Вихід втрачено"
+    internal fun stateLabel(status: CaptureStatus) = when (status) {
+        CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT -> R.string.status_ready
+        CaptureStatus.PREPARING_PROJECTION, CaptureStatus.PREPARING_AUDIO_RECORD, CaptureStatus.PREPARING_ANIMATION -> R.string.status_preparing
+        CaptureStatus.ROUTE_LOST -> R.string.status_route_lost
         CaptureStatus.ROUTER_INIT_FAILED, CaptureStatus.AUDIO_RECORD_INIT_FAILED,
-        CaptureStatus.AUDIO_RECORD_START_FAILED, CaptureStatus.AUDIO_RECORD_INIT_TIMEOUT -> "Помилка запуску"
-        CaptureStatus.VIDEO_UNAVAILABLE_OR_PROTECTED -> "Відео недоступне"
+        CaptureStatus.AUDIO_RECORD_START_FAILED, CaptureStatus.AUDIO_RECORD_INIT_TIMEOUT -> R.string.status_start_failed
+        CaptureStatus.VIDEO_UNAVAILABLE_OR_PROTECTED -> R.string.status_video_unavailable
         CaptureStatus.CAPTURE_ACTIVE, CaptureStatus.CAPTURE_ACTIVE_AUDIO,
-        CaptureStatus.CAPTURE_ACTIVE_VIDEO, CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO -> "Активне"
-    }
-
-    private fun modeLabel(mode: RenderMode) = when (mode) {
-        RenderMode.AUDIO -> "Аудіо"
-        RenderMode.VIDEO -> "Відео"
-        RenderMode.VIDEO_AUDIO -> "Аудіо + відео"
+        CaptureStatus.CAPTURE_ACTIVE_VIDEO, CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO, CaptureStatus.CAPTURE_ACTIVE_ANIMATION -> R.string.status_active
     }
 }
 
 /** Local-only visual patterns. The existing main-screen button cycles these without an output route. */
 enum class LocalVisualPattern(
-    val label: String,
     val colors: IntArray? = null,
     val style: LocalVisualStyle = LocalVisualStyle.SOLID_OR_GRADIENT,
 ) {
-    RAINBOW("Райдужна анімація", style = LocalVisualStyle.RAINBOW),
-    BLACK("Чорний", intArrayOf(Color.BLACK)),
-    WHITE("Білий", intArrayOf(Color.WHITE)),
-    RED("Червоний", intArrayOf(Color.RED)),
-    GREEN("Зелений", intArrayOf(Color.GREEN)),
-    BLUE("Синій", intArrayOf(Color.BLUE)),
-    RGB("RGB", intArrayOf(Color.RED, Color.GREEN, Color.BLUE)),
-    HORIZONTAL_BARS("Горизонтальні кольорові смуги", style = LocalVisualStyle.HORIZONTAL_BARS),
-    VERTICAL_BARS("Вертикальні кольорові смуги", style = LocalVisualStyle.VERTICAL_BARS),
-    CORNER_COLOURS("Кольори сторін і кутів", style = LocalVisualStyle.CORNER_COLOURS),
-    COLOUR_WHEEL("Кольорове коло", style = LocalVisualStyle.COLOUR_WHEEL),
-    CHECKERBOARD("Шахівниця", style = LocalVisualStyle.CHECKERBOARD),
-    GRAYSCALE_RAMP("Градація сірого", style = LocalVisualStyle.GRAYSCALE_RAMP),
-    MOVING_BARS("Рухомі кольорові смуги", style = LocalVisualStyle.MOVING_BARS),
+    RAINBOW(style = LocalVisualStyle.RAINBOW),
+    BLACK(intArrayOf(Color.BLACK)), WHITE(intArrayOf(Color.WHITE)), RED(intArrayOf(Color.RED)),
+    GREEN(intArrayOf(Color.GREEN)), BLUE(intArrayOf(Color.BLUE)), RGB(intArrayOf(Color.RED, Color.GREEN, Color.BLUE)),
+    HORIZONTAL_BARS(style = LocalVisualStyle.HORIZONTAL_BARS), VERTICAL_BARS(style = LocalVisualStyle.VERTICAL_BARS),
+    CORNER_COLOURS(style = LocalVisualStyle.CORNER_COLOURS), COLOUR_WHEEL(style = LocalVisualStyle.COLOUR_WHEEL),
+    CHECKERBOARD(style = LocalVisualStyle.CHECKERBOARD), GRAYSCALE_RAMP(style = LocalVisualStyle.GRAYSCALE_RAMP),
+    MOVING_BARS(style = LocalVisualStyle.MOVING_BARS),
 }
 
 enum class LocalVisualStyle {
@@ -241,6 +225,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var testButton: Button
     private lateinit var audioBox: CheckBox
     private lateinit var videoBox: CheckBox
+    private lateinit var animationBox: CheckBox
     private lateinit var effectSpinner: Spinner
     private lateinit var hyperionMode: CheckBox
     private lateinit var wledMode: CheckBox
@@ -250,6 +235,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var videoColourTreatmentRow: LinearLayout
     private lateinit var videoColourTreatmentSpinner: Spinner
     private lateinit var videoSaturationRow: LinearLayout
+    private lateinit var animationColourRow: LinearLayout
+    private lateinit var animationColourSpinner: Spinner
     private lateinit var zonesRow: LinearLayout
     private lateinit var discoverButton: Button
 
@@ -276,7 +263,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                     // The service discarded the unconsumed one-shot route; make this admission retryable.
                     invalidatePendingCaptureAdmission()
                     captureToggleCoordinator.invalidatePending()
-                    status.text = "Не вдалося прийняти вихід для захоплення; нічого не розпочато."
+                    status.text = getString(R.string.route_admission_failed)
                 } else {
                     // Sent only after the service has consumed and installed this exact route binding.
                     pendingWled = null; pendingHyperion = null
@@ -295,7 +282,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             setPadding(48, 36, 48, 36)
         }
         val root = contentRoot
-        root.addView(TextView(this).apply { text = "Audio Reactive TV"; textSize = 26f })
+        root.addView(TextView(this).apply { text = getString(R.string.app_title); textSize = 26f })
         captureIndicator = TextView(this).apply { textSize = 19f }
         root.addView(captureIndicator)
         status = TextView(this).apply { textSize = 15f; maxLines = 2 }
@@ -326,10 +313,10 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             onUpdateAvailable = {
                 if (!isFinishing && !isDestroyed) {
                     AlertDialog.Builder(this)
-                        .setTitle("Доступне оновлення")
-                        .setMessage("Завантажити, перевірити та відкрити системне підтвердження встановлення?")
-                        .setNegativeButton("Ні", null)
-                        .setPositiveButton("Так") { _, _ -> releaseUpdater.updateSelectedRelease() }
+                        .setTitle(R.string.update_available_title)
+                        .setMessage(R.string.update_available_message)
+                        .setNegativeButton(R.string.no, null)
+                        .setPositiveButton(R.string.yes) { _, _ -> releaseUpdater.updateSelectedRelease() }
                         .show()
                 }
             },
@@ -343,18 +330,31 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun buildControlTab(panel: LinearLayout) {
         captureButton = Button(this).apply { id = View.generateViewId(); setOnClickListener { handleCaptureToggle() } }
         panel.addView(captureButton)
-        panel.addView(TextView(this).apply { text = "Режим захоплення" })
+        panel.addView(TextView(this).apply { text = getString(R.string.capture_mode) })
         val initial = RuntimeSettings.snapshot().renderMode
-        audioBox = CheckBox(this).apply { id = View.generateViewId(); text = "Аудіо"; isChecked = initial != RenderMode.VIDEO }
-        videoBox = CheckBox(this).apply { id = View.generateViewId(); text = "Відео"; isChecked = initial != RenderMode.AUDIO }
-        val listener = CompoundButton.OnCheckedChangeListener { _, _ -> resolveCaptureMode() }
-        audioBox.setOnCheckedChangeListener(listener); videoBox.setOnCheckedChangeListener(listener)
-        panel.addView(audioBox); panel.addView(videoBox)
-        modeMutableRows += audioBox; modeMutableRows += videoBox
+        audioBox = CheckBox(this).apply { id = View.generateViewId(); text = getString(R.string.mode_audio); isChecked = initial == RenderMode.AUDIO || initial == RenderMode.VIDEO_AUDIO }
+        videoBox = CheckBox(this).apply { id = View.generateViewId(); text = getString(R.string.mode_video); isChecked = initial == RenderMode.VIDEO || initial == RenderMode.VIDEO_AUDIO }
+        animationBox = CheckBox(this).apply { id = View.generateViewId(); text = getString(R.string.mode_animation); isChecked = initial == RenderMode.ANIMATION }
+        val listener = CompoundButton.OnCheckedChangeListener { changed, checked ->
+            if (suppressModeCallbacks) return@OnCheckedChangeListener
+            if (checked && changed === animationBox) {
+                suppressModeCallbacks = true
+                audioBox.isChecked = false; videoBox.isChecked = false
+                suppressModeCallbacks = false
+            } else if (checked && (changed === audioBox || changed === videoBox)) {
+                suppressModeCallbacks = true
+                animationBox.isChecked = false
+                suppressModeCallbacks = false
+            }
+            resolveCaptureMode()
+        }
+        audioBox.setOnCheckedChangeListener(listener); videoBox.setOnCheckedChangeListener(listener); animationBox.setOnCheckedChangeListener(listener)
+        panel.addView(audioBox); panel.addView(videoBox); panel.addView(animationBox)
+        modeMutableRows += audioBox; modeMutableRows += videoBox; modeMutableRows += animationBox
         addEffectSelector(panel)
         testButton = Button(this).apply {
-            text = "Тест екрана: ${LocalVisualPattern.entries[localVisualPatternIndex].label}"
-            contentDescription = "Повноекранне локальне тестове зображення; без захоплення, маршруту, сокета або виходу"
+            text = getString(R.string.screen_test, UiStrings.localVisualPattern(this@MainActivity, LocalVisualPattern.entries[localVisualPatternIndex]))
+            contentDescription = getString(R.string.screen_test_description)
             setOnClickListener { cycleLocalVisualPattern() }
         }
         panel.addView(testButton)
@@ -362,13 +362,13 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     /** Technical and maintenance actions follow capture and output controls on the same scrollable screen. */
     private fun buildAdditionalTools(panel: LinearLayout) {
-        panel.addView(TextView(this).apply { text = "Додатково"; textSize = 18f })
-        panel.addView(Button(this).apply { text = "Детальний локальний стан"; setOnClickListener { showDetailedStatus() } })
+        panel.addView(TextView(this).apply { text = getString(R.string.additional); textSize = 18f })
+        panel.addView(Button(this).apply { text = getString(R.string.detailed_local_status); setOnClickListener { showDetailedStatus() } })
     }
 
     /** Compatible selector stays enabled: while active it mutates renderer-local state only. */
     private fun addEffectSelector(panel: LinearLayout) {
-        panel.addView(TextView(this).apply { text = "Ефект" })
+        panel.addView(TextView(this).apply { text = getString(R.string.effect) })
         effectSpinner = Spinner(this).apply {
             id = View.generateViewId()
             isEnabled = EffectSelectionPolicy.enabledWhileCaptureActive()
@@ -381,6 +381,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                         RenderMode.AUDIO -> Effect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setEffect(value) else RuntimeSettings.update { it.copy(effect = value) } }
                         RenderMode.VIDEO -> VideoEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoEffect(value) else RuntimeSettings.update { it.copy(videoEffect = value) } }
                         RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoAudioEffect(value) else RuntimeSettings.update { it.copy(videoAudioEffect = value) } }
+                        RenderMode.ANIMATION -> AnimationEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setAnimationEffect(value) else RuntimeSettings.update { it.copy(animationEffect = value) } }
                     }
                 }
             }
@@ -394,7 +395,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val settings = effectiveRenderSettings()
         suppressEffectSelection = true
         try {
-            effectSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, EffectSelectorPolicy.labels(settings))
+            effectSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, UiStrings.effectLabels(this, settings))
             effectSpinner.setSelection(EffectSelectorPolicy.selectedIndex(settings), false)
         } finally {
             suppressEffectSelection = false
@@ -403,10 +404,10 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     private fun buildModesTab(panel: LinearLayout) {
         qualityRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
-        qualityRow.addView(TextView(this).apply { text = "Якість відео Hyperion" })
+        qualityRow.addView(TextView(this).apply { text = getString(R.string.video_quality_hyperion) })
         qualityRow.addView(Spinner(this).apply {
             id = View.generateViewId()
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, VideoQuality.entries.map { it.label })
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, VideoQuality.entries.map { UiStrings.videoQuality(this@MainActivity, it) })
             setSelection(RuntimeSettings.snapshot().videoQuality.ordinal)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -417,30 +418,30 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         })
         panel.addView(qualityRow)
         modeMutableRows += qualityRow
-        videoFpsRow = sliderRow("FPS (Аудіо / Відео / Аудіо+відео)", VideoCapturePolicy.fpsOptions.indexOf(RuntimeSettings.snapshot().fps).coerceAtLeast(0), VideoCapturePolicy.fpsOptions.lastIndex, { "${VideoCapturePolicy.fpsOptions[it]} fps" }) {
+        videoFpsRow = sliderRow(getString(R.string.fps_label), VideoCapturePolicy.fpsOptions.indexOf(RuntimeSettings.snapshot().fps).coerceAtLeast(0), VideoCapturePolicy.fpsOptions.lastIndex, { getString(R.string.fps_value, VideoCapturePolicy.fpsOptions[it]) }) {
             RuntimeSettings.update { settings -> settings.copy(fps = VideoCapturePolicy.fpsOptions[it]) }
         }
         panel.addView(videoFpsRow)
         modeMutableRows += videoFpsRow
 
-        panel.addView(TextView(this).apply { text = "Звук" })
-        sliderRow("Чутливість", ((RuntimeSettings.snapshot().sensitivity - .25f) / .05f).toInt(), 60, { SliderFormatters.sensitivity(.25f + it * .05f) }) {
+        panel.addView(TextView(this).apply { text = getString(R.string.audio_section) })
+        sliderRow(getString(R.string.sensitivity), ((RuntimeSettings.snapshot().sensitivity - .25f) / .05f).toInt(), 60, { SliderFormatters.sensitivity(this, .25f + it * .05f) }) {
             updateSensitivity(.25f + it * .05f)
         }.also(panel::addView)
-        sliderRow("Яскравість", (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, { SliderFormatters.brightness(it * .05f) }) {
+        sliderRow(getString(R.string.brightness), (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, { SliderFormatters.brightness(this, it * .05f) }) {
             updateBrightness(it * .05f)
         }.also(panel::addView)
-        sliderRow("Мінімальна яскравість без звуку", (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, { SliderFormatters.brightness(it * .05f) }) {
+        sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, { SliderFormatters.brightness(this, it * .05f) }) {
             updateVideoAudioSilenceBrightnessFloor(it * .05f)
         }.also(panel::addView)
-        sliderRow("Затримка тиші", RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, { "${it * 100} мс" }) { updateSilenceHoldMillis(it * 100) }.also(panel::addView)
-        sliderRow("Плавність тиші", (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, { "${100 + it * 100} мс" }) { updateSilenceFadeMillis(100 + it * 100) }.also(panel::addView)
-        panel.addView(TextView(this).apply { text = "Параметри ефекту" })
+        sliderRow(getString(R.string.silence_hold), RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, { getString(R.string.milliseconds, it * 100) }) { updateSilenceHoldMillis(it * 100) }.also(panel::addView)
+        sliderRow(getString(R.string.silence_fade), (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, { getString(R.string.milliseconds, 100 + it * 100) }) { updateSilenceFadeMillis(100 + it * 100) }.also(panel::addView)
+        panel.addView(TextView(this).apply { text = getString(R.string.effect_parameters) })
         videoColourTreatmentRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
-        videoColourTreatmentRow.addView(TextView(this).apply { text = "Базова обробка кольору відео" })
+        videoColourTreatmentRow.addView(TextView(this).apply { text = getString(R.string.video_colour_treatment) })
         videoColourTreatmentSpinner = Spinner(this).apply {
             id = View.generateViewId()
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, VideoColourTreatmentPolicy.labels())
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, VideoEffect.entries.map { UiStrings.videoEffect(this@MainActivity, it) })
             setSelection(VideoColourTreatmentPolicy.selectedIndex(RuntimeSettings.snapshot()), false)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
@@ -455,34 +456,49 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         }
         videoColourTreatmentRow.addView(videoColourTreatmentSpinner)
         panel.addView(videoColourTreatmentRow)
-        videoSaturationRow = sliderRow("Насиченість відео", RuntimeSettings.snapshot().videoSaturationPercent, VideoSaturationPolicy.MAX_PERCENT, { "$it%" }) { value ->
+        videoSaturationRow = sliderRow(getString(R.string.video_saturation), RuntimeSettings.snapshot().videoSaturationPercent, VideoSaturationPolicy.MAX_PERCENT, { getString(R.string.format_percent, it) }) { value ->
             if (AudioReactiveService.exists()) LiveRendererSettings.setVideoSaturationPercent(value)
             else RuntimeSettings.update { it.copy(videoSaturationPercent = value) }
         }
         panel.addView(videoSaturationRow)
-        sliderRow("Швидкість", ((RuntimeSettings.snapshot().effectParameters.speed - .25f) / .25f).toInt(), 11, { "${.25f + it * .25f}×" }) { v -> updateEffectParameters { it.copy(speed = .25f + v * .25f) } }.also { panel.addView(it) }
-        sliderRow("Слід", (RuntimeSettings.snapshot().effectParameters.trail * 10).toInt(), 10, { "${it * 10}%" }) { v -> updateEffectParameters { it.copy(trail = v / 10f) } }.also { panel.addView(it) }
-        sliderRow("Поріг біту", ((RuntimeSettings.snapshot().effectParameters.beatThreshold - .05f) / .05f).toInt(), 18, { "${5 + it * 5}%" }) { v -> updateEffectParameters { it.copy(beatThreshold = .05f + v * .05f) } }.also { panel.addView(it) }
-        sliderRow("Зсув палітри", ((RuntimeSettings.snapshot().effectParameters.hueShift + 180f) / 15f).toInt(), 24, { "${-180 + it * 15}°" }) { v -> updateEffectParameters { it.copy(hueShift = -180f + v * 15f) } }.also { panel.addView(it) }
+        animationColourRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
+        animationColourRow.addView(TextView(this).apply { text = getString(R.string.animation_palette) })
+        animationColourSpinner = Spinner(this).apply {
+            id = View.generateViewId()
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, AnimationColour.entries.map { UiStrings.animationColour(this@MainActivity, it) })
+            setSelection(RuntimeSettings.snapshot().animationColour.ordinal, false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    AnimationColour.entries.getOrNull(position)?.let { colour -> if (AudioReactiveService.exists()) LiveRendererSettings.setAnimationColour(colour) else RuntimeSettings.update { it.copy(animationColour = colour) } }
+                }
+            }
+        }
+        animationColourRow.addView(animationColourSpinner)
+        panel.addView(animationColourRow)
+        sliderRow(getString(R.string.speed), ((RuntimeSettings.snapshot().effectParameters.speed - .25f) / .25f).toInt(), 11, { getString(R.string.format_multiplier, .25f + it * .25f) }) { v -> updateEffectParameters { it.copy(speed = .25f + v * .25f) } }.also { panel.addView(it) }
+        sliderRow(getString(R.string.trail), (RuntimeSettings.snapshot().effectParameters.trail * 10).toInt(), 10, { getString(R.string.format_percent, it * 10) }) { v -> updateEffectParameters { it.copy(trail = v / 10f) } }.also { panel.addView(it) }
+        sliderRow(getString(R.string.beat_threshold), ((RuntimeSettings.snapshot().effectParameters.beatThreshold - .05f) / .05f).toInt(), 18, { getString(R.string.format_percent, 5 + it * 5) }) { v -> updateEffectParameters { it.copy(beatThreshold = .05f + v * .05f) } }.also { panel.addView(it) }
+        sliderRow(getString(R.string.palette_shift), ((RuntimeSettings.snapshot().effectParameters.hueShift + 180f) / 15f).toInt(), 24, { getString(R.string.format_degrees, -180 + it * 15) }) { v -> updateEffectParameters { it.copy(hueShift = -180f + v * 15f) } }.also { panel.addView(it) }
     }
 
     private fun buildOutputsTab(panel: LinearLayout) {
-        panel.addView(TextView(this).apply { text = "Вихід (Hyperion або WLED)" })
-        hyperionMode = CheckBox(this).apply { id = View.generateViewId(); text = "Hyperion" }
-        wledMode = CheckBox(this).apply { id = View.generateViewId(); text = "WLED" }
+        panel.addView(TextView(this).apply { text = getString(R.string.output) })
+        hyperionMode = CheckBox(this).apply { id = View.generateViewId(); text = getString(R.string.hyperion) }
+        wledMode = CheckBox(this).apply { id = View.generateViewId(); text = getString(R.string.wled) }
         hyperionMode.setOnCheckedChangeListener { _, checked -> if (OutputUiPolicy.handlesCheckboxChange(suppressOutputCallbacks)) selectOutput(OutputMode.HYPERION, checked) }
         wledMode.setOnCheckedChangeListener { _, checked -> if (OutputUiPolicy.handlesCheckboxChange(suppressOutputCallbacks)) selectOutput(OutputMode.WLED, checked) }
         panel.addView(hyperionMode)
         panel.addView(wledMode)
-        discoverButton = Button(this).apply { text = "Знайти вибрані виходи"; setOnClickListener { discover(RuntimeSettings.snapshot().outputMode) } }
+        discoverButton = Button(this).apply { text = getString(R.string.find_selected_outputs); setOnClickListener { discover(RuntimeSettings.snapshot().outputMode) } }
         panel.addView(discoverButton)
         outputRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(outputRows)
-        zonesRow = sliderRow("Зони джерела WLED", RuntimeSettings.snapshot().wledSourceZones / 16 - 1, 31, { "${(it + 1) * 16}" }) {
+        zonesRow = sliderRow(getString(R.string.source_zones), RuntimeSettings.snapshot().wledSourceZones / 16 - 1, 31, { "${(it + 1) * 16}" }) {
             RuntimeSettings.update { settings -> settings.copy(wledSourceZones = (it + 1) * 16) }
         }
         panel.addView(zonesRow)
-        panel.addView(Button(this).apply { text = "Налаштування MQTT"; setOnClickListener { showMqttSettingsDialog() } })
+        panel.addView(Button(this).apply { text = getString(R.string.mqtt_settings); setOnClickListener { showMqttSettingsDialog() } })
     }
 
     private fun updateEffectParameters(transform: (EffectParameters) -> EffectParameters) {
@@ -514,7 +530,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val value = TextView(this@MainActivity)
-            fun show(progress: Int) { value.text = "$label: ${format(progress)}" }
+            fun show(progress: Int) { value.text = getString(R.string.slider_value, label, format(progress)) }
             show(initial)
             addView(value)
             addView(SeekBar(this@MainActivity).apply {
@@ -536,7 +552,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         if (suppressModeCallbacks) return
         val persisted = RuntimeSettings.snapshot()
         val previous = effectiveRenderSettings().renderMode
-        val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, previous)
+        val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, animationBox.isChecked, previous)
         val accepted = !AudioReactiveService.exists() || LiveRendererSettings.setRenderMode(result.mode)
         val visible = LiveRenderModeUiPolicy.checkboxes(
             if (accepted) {
@@ -546,10 +562,11 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         suppressModeCallbacks = true
         audioBox.isChecked = visible.audioChecked
         videoBox.isChecked = visible.videoChecked
+        animationBox.isChecked = visible.animationChecked
         suppressModeCallbacks = false
         if (!AudioReactiveService.exists()) RuntimeSettings.update { it.copy(renderMode = result.mode) }
-        if (!accepted) status.text = "Перехід до відео відхилено: WLED потребує зупинки, перевірки та перезапуску."
-        else if (result.rejected) status.text = "Потрібен щонайменше один режим."
+        if (!accepted) status.text = getString(R.string.video_change_rejected)
+        else if (result.rejected) status.text = getString(R.string.no_mode_selected)
         rebuildEffectSelector()
         refreshConditionalControls()
         MqttControlService.notifyDiagnosticChanged()
@@ -571,7 +588,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun discover(mode: OutputMode) {
         if (AudioReactiveService.exists()) return
         val discoveryGeneration = discoveryAdmissionGeneration.get()
-        status.text = "Шукаю локальні ${mode.label}…"
+        status.text = getString(R.string.discovery_searching, UiStrings.outputMode(this, mode))
         discoverButton.isEnabled = false
         work.execute {
             when (mode) {
@@ -581,7 +598,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                         if (canMergeDiscovery(discoveryGeneration, mode)) {
                             latestWled = found.map { it.identity }.toSet()
                             RuntimeSettings.update { it.copy(wledDevices = WledInventory.merge(it.wledDevices, found)) }
-                            status.text = "Знайдено WLED: ${found.size}"
+                            status.text = getString(R.string.discovery_wled_found, found.size)
                             renderOutputUi()
                         }
                         refreshCaptureUi()
@@ -593,7 +610,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                         if (canMergeDiscovery(discoveryGeneration, mode)) {
                             latestHyperion = found.map { it.identity }.toSet()
                             RuntimeSettings.update { it.copy(hyperionDevices = HyperionInventory.merge(it.hyperionDevices, found)) }
-                            status.text = "Знайдено Hyperion: ${found.size}"
+                            status.text = getString(R.string.discovery_hyperion_found, found.size)
                             renderOutputUi()
                         }
                         refreshCaptureUi()
@@ -622,8 +639,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         RainbowVisualSourcePolicy.start()
         rainbowHandler.removeCallbacks(rainbowAnimator)
         rainbowHandler.removeCallbacks(movingBarsAnimator)
-        testButton.text = "Тест екрана: ${pattern.label}"
-        status.text = "Локальний шаблон: ${pattern.label}. Мережевий вихід не використовується."
+        val label = UiStrings.localVisualPattern(this, pattern)
+        testButton.text = getString(R.string.screen_test, label)
+        status.text = getString(R.string.local_pattern_status, label)
         if (pattern == LocalVisualPattern.RAINBOW) {
             rainbowAnimator.run()
         } else if (pattern.style == LocalVisualStyle.MOVING_BARS) {
@@ -643,22 +661,28 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun showMqttSettingsDialog() {
         val current = RuntimeSettings.snapshot().mqttBroker
         fun field(label: String, value: String, type: Int = InputType.TYPE_CLASS_TEXT): EditText = EditText(this).apply { hint = label; setText(value); inputType = type }
-        val ip = field("IPv4 broker", current.ip)
-        val port = field("Порт", current.port.toString(), InputType.TYPE_CLASS_NUMBER)
-        val username = field("Логін (необов’язково)", current.username)
-        val password = field("Пароль (необов’язково)", current.password, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        val ip = field(getString(R.string.mqtt_ip_hint), current.ip)
+        val port = field(getString(R.string.mqtt_port_hint), current.port.toString(), InputType.TYPE_CLASS_NUMBER)
+        val username = field(getString(R.string.mqtt_username_hint), current.username)
+        val password = field(getString(R.string.mqtt_password_hint), current.password, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 16, 48, 8); addView(ip); addView(port); addView(username); addView(password) }
-        AlertDialog.Builder(this).setTitle("Home Assistant MQTT")
-            .setMessage("Дозволено лише literal private RFC1918 IPv4 та порт 1–65535. Порожній логін використовує anonymous MQTT.")
-            .setView(form).setNegativeButton("Скасувати", null)
-            .setPositiveButton("Зберегти", null).create().also { dialog ->
+        AlertDialog.Builder(this).setTitle(R.string.mqtt_dialog_title)
+            .setMessage(R.string.mqtt_dialog_message)
+            .setView(form).setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.save, null).create().also { dialog ->
                 dialog.setOnShowListener {
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                         val result = MqttBrokerSettings.fromInput(ip.text.toString(), port.text.toString(), username.text.toString(), password.text.toString())
                         val broker = result.settings
-                        if (broker == null) { ip.error = result.error; return@setOnClickListener }
+                        if (broker == null) {
+                            ip.error = getString(when (result.error) {
+                                MqttBrokerSettings.ValidationError.INVALID_PORT -> R.string.invalid_port
+                                MqttBrokerSettings.ValidationError.INVALID_BROKER, null -> R.string.invalid_broker
+                            })
+                            return@setOnClickListener
+                        }
                         RuntimeSettings.update { it.copy(mqttBroker = broker) }
-                        status.text = "MQTT broker збережено; перепідключення виконується."
+                        status.text = getString(R.string.mqtt_saved)
                         dialog.dismiss()
                     }
                 }
@@ -682,7 +706,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         if (settings.outputMode == OutputMode.WLED) settings.wledDevices.forEach { device ->
             outputRows.addView(CheckBox(this).apply {
                 val stale = device.identity !in latestWled
-                text = "${device.name} (${device.host}, ${device.leds} LED)" + if (stale) " — недоступний, потрібна перевірка" else ""
+                text = getString(R.string.device_wled, device.name, device.host, device.leds, if (stale) getString(R.string.device_stale) else "")
                 isChecked = device.identity in settings.selectedWledIdentities
                 isEnabled = !active
                 setOnCheckedChangeListener { _, on ->
@@ -691,11 +715,11 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                     }
                 }
             })
-            outputRows.addView(Button(this).apply { text = if (settings.calibrationFor(device)?.validFor(device)==true) "Калібрування: ${device.name}" else "Калібрувати ${device.name}"; isEnabled = !active; setOnClickListener { openCalibrationWizard(device) } })
+            outputRows.addView(Button(this).apply { text = if (settings.calibrationFor(device)?.validFor(device)==true) getString(R.string.calibration_existing, device.name) else getString(R.string.calibrate, device.name); isEnabled = !active; setOnClickListener { openCalibrationWizard(device) } })
         } else settings.hyperionDevices.forEach { device ->
             outputRows.addView(CheckBox(this).apply {
                 val stale = device.identity !in latestHyperion
-                text = "${device.name} (${device.host})" + if (stale) " — недоступний, потрібна перевірка" else ""
+                text = getString(R.string.device_hyperion, device.name, device.host, if (stale) getString(R.string.device_stale) else "")
                 isChecked = device.identity == settings.selectedHyperionIdentity
                 isEnabled = !active
                 setOnCheckedChangeListener { _, on ->
@@ -720,6 +744,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             suppressVideoColourTreatmentSelection = false
         }
         videoSaturationRow.visibility = if (TvUiStatePolicy.showVideoSaturation(settings.renderMode)) View.VISIBLE else View.GONE
+        animationColourRow.visibility = if (TvUiStatePolicy.showAnimationControls(settings.renderMode)) View.VISIBLE else View.GONE
         videoFpsRow.visibility = View.VISIBLE
         zonesRow.visibility = if (TvUiStatePolicy.showWledZones(settings.outputMode)) View.VISIBLE else View.GONE
     }
@@ -749,7 +774,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             ) {
                 RouteRecoveryPolicy.Decision.ORDINARY_FLOW -> captureToggleCoordinator.toggle()
                 RouteRecoveryPolicy.Decision.REQUIRE_LOCAL_BUTTON -> {
-                    status.text = "Вихід втрачено. Повторіть спробу локально кнопкою захоплення."
+                    status.text = getString(R.string.route_lost_local)
                     captureButton.requestFocus()
                 }
                 RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION,
@@ -786,7 +811,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private fun refreshCaptureUi(updateStatus: Boolean = false) {
         val active = AudioReactiveService.exists()
         val captureStatus = AudioReactiveService.captureStatus()
-        captureIndicator.text = CaptureUiPresentation.indicator(captureStatus, effectiveRenderSettings().renderMode)
+        captureIndicator.text = CaptureUiPresentation.indicator(this, captureStatus, effectiveRenderSettings().renderMode)
         val mayRecover = RouteRecoveryPolicy.decide(
             RouteRecoveryPolicy.Origin.LOCAL_CAPTURE_BUTTON,
             captureStatus,
@@ -794,9 +819,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             captureAdmissionLocked,
         ) == RouteRecoveryPolicy.Decision.START_NEW_LOCAL_ADMISSION
         captureButton.text = when {
-            active -> OutputUiPolicy.DISABLE
-            mayRecover -> "Повторно перевірити й увімкнути"
-            else -> OutputUiPolicy.ENABLE
+            active -> getString(R.string.capture_disable)
+            mayRecover -> getString(R.string.capture_retry)
+            else -> getString(R.string.capture_enable)
         }
         val locked = active || captureAdmissionLocked
         captureButton.isEnabled = !captureAdmissionLocked
@@ -804,14 +829,14 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         testButton.isEnabled = !captureAdmissionLocked
         modeMutableRows.forEach { control ->
             // Capture inputs are renderer-local and intentionally remain live; all admission/route settings stay locked.
-            val enabled = if (control === audioBox || control === videoBox) !captureAdmissionLocked else !locked
+            val enabled = if (control === audioBox || control === videoBox || control === animationBox) !captureAdmissionLocked else !locked
             if (control is LinearLayout) setChildrenEnabled(control, enabled) else control.isEnabled = enabled
         }
         discoverButton.isEnabled = !locked
         setChildrenEnabled(zonesRow, !locked)
         renderOutputUi()
         refreshConditionalControls()
-        if (updateStatus) status.text = captureStatus.uiText
+        if (updateStatus) status.text = UiStrings.captureStatus(this, captureStatus)
     }
 
     private fun setChildrenEnabled(row: LinearLayout, enabled: Boolean) {
@@ -819,7 +844,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         for (i in 0 until row.childCount) row.getChildAt(i).isEnabled = enabled
     }
 
-    private fun showDetailedStatus() { val s=LocalStatusStore.snapshot(); AlertDialog.Builder(this).setTitle("Локальний стан").setMessage("Стадія: ${s.stage}\nВиходи: ${s.outputs.joinToString().ifBlank{"—"}}\nКалібровані: ${s.calibrated.joinToString().ifBlank{"—"}}\nПропущені: ${s.skipped.joinToString().ifBlank{"—"}}\nКадри: ${s.frames}; FPS: ${"%.1f".format(s.fps)}\nОстання відправка: ${s.lastSend}\nRMS: ${"%.3f".format(s.rms)}; peak: ${"%.3f".format(s.peak)}").setPositiveButton("Закрити",null).show() }
+    private fun showDetailedStatus() {
+        val s = LocalStatusStore.snapshot()
+        val lastSend = when (s.lastSendSucceeded) {
+            true -> getString(R.string.status_send_ok)
+            false -> getString(R.string.status_send_failed)
+            null -> getString(R.string.status_send_none)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.local_status_title)
+            .setMessage(getString(R.string.status_detail, UiStrings.captureStatus(this, s.captureStatus), s.outputs.joinToString().ifBlank { getString(R.string.none) }, s.calibrated.joinToString().ifBlank { getString(R.string.none) }, s.skipped.joinToString().ifBlank { getString(R.string.none) }, s.frames, s.fps, lastSend, s.rms, s.peak))
+            .setPositiveButton(R.string.close, null)
+            .show()
+    }
     /** Modal D-pad calibration for exactly one stable MAC. It only edits app preferences on Save. */
     private fun openCalibrationWizard(device: WledDevice) {
         if (AudioReactiveService.exists()) return
@@ -827,19 +864,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 8, 32, 8) }
         var remainingText: TextView? = null
         var directionButton: Button? = null
-        val dialog = AlertDialog.Builder(this).setTitle("Калібрування ${device.name}").setView(ScrollView(this).apply { addView(rows) })
-            .setNegativeButton("Відкинути", null)
-            .setNeutralButton("Скинути") { _, _ ->
+        val dialog = AlertDialog.Builder(this).setTitle(getString(R.string.calibration_title, device.name)).setView(ScrollView(this).apply { addView(rows) })
+            .setNegativeButton(R.string.discard, null)
+            .setNeutralButton(R.string.reset) { _, _ ->
                 if (!AudioReactiveService.exists()) RuntimeSettings.update { current -> current.copy(wledCalibrations = current.wledCalibrations.filterNot { it.identity == device.identity }) }
                 renderOutputUi()
             }
-            .setPositiveButton("Зберегти") { _, _ ->
+            .setPositiveButton(R.string.save) { _, _ ->
                 if (WledCalibrationWizardPolicy.canSave(AudioReactiveService.exists(), draft, device)) RuntimeSettings.update { current -> current.copy(wledCalibrations = current.wledCalibrations.filterNot { it.identity == device.identity } + draft) }
                 renderOutputUi()
             }.create()
         fun render() {
-            remainingText?.text = "Залишилось LED: ${WledCalibrationEditor.remaining(draft)} (Save тільки при 0)"
-            directionButton?.text = "Напрямок: ${draft.direction}"
+            remainingText?.text = getString(R.string.remaining_leds, WledCalibrationEditor.remaining(draft))
+            directionButton?.text = getString(R.string.direction, UiStrings.perimeterDirection(this, draft.direction))
             for (i in 0 until rows.childCount) {
                 val row = rows.getChildAt(i)
                 if (row is LinearLayout && row.childCount > 0 && row.getChildAt(0) is TextView) {
@@ -861,26 +898,26 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             valueText.tag = Pair(label, value)
         }
         fun addAction(label: String, action: () -> Unit): Button = Button(this).apply { this.text = label; isAllCaps = false; setOnClickListener { if (!AudioReactiveService.exists()) action() } }.also(rows::addView)
-        val physicalCount = TextView(this).apply { text = "MAC: ${device.identity}\nФізичні LED: перевіряються лише для читання…\nПочаток 0 = логічний нижній-лівий." }
+        val physicalCount = TextView(this).apply { text = getString(R.string.physical_leds_pending, device.identity) }
         rows.addView(physicalCount)
         remainingText = TextView(this).apply { textSize = 17f }
         rows.addView(requireNotNull(remainingText))
-        addStepper("Стартовий піксель", { draft.startPixel.toString() }) { d -> draft = draft.copy(startPixel = Math.floorMod(draft.startPixel + d, device.leds)) }
+        addStepper(getString(R.string.start_pixel), { draft.startPixel.toString() }) { d -> draft = draft.copy(startPixel = Math.floorMod(draft.startPixel + d, device.leds)) }
         directionButton = Button(this).apply { isAllCaps = false; setOnClickListener { if (!AudioReactiveService.exists()) { draft = draft.copy(direction = if (draft.direction == PerimeterDirection.CW) PerimeterDirection.CCW else PerimeterDirection.CW); render() } } }
         rows.addView(requireNotNull(directionButton))
-        ScreenEdge.entries.forEach { edge -> addStepper("${edge.name.lowercase().replaceFirstChar { it.uppercase() }} LED", { draft.allocation(edge).toString() }) { d -> draft = WledCalibrationEditor.changeAllocation(draft, edge, d) } }
-        ScreenEdge.entries.forEach { edge -> addStepper("Inset ${edge.name.lowercase()}", { "${draft.inset(edge)}%" }) { d -> draft = WledCalibrationEditor.changeInset(draft, edge, d) } }
-        addStepper("Глибина вибірки", { "${draft.depthPercent}%" }) { d -> draft = draft.copy(depthPercent = (draft.depthPercent + d).coerceIn(2, 25)) }
-        addStepper("Зразків на край", { draft.samplesPerEdge.toString() }) { d -> draft = draft.copy(samplesPerEdge = (draft.samplesPerEdge + d * 4).coerceIn(4, 64) / 4 * 4) }
-        addStepper("Gamma", { String.format(java.util.Locale.US, "%.1f", draft.gamma) }) { d -> draft = draft.copy(gamma = (draft.gamma + d * .1f).coerceIn(1f, 3.5f)) }
-        addStepper("Ліміт яскравості", { "${(draft.brightnessLimit * 100).toInt()}%" }) { d -> draft = draft.copy(brightnessLimit = (draft.brightnessLimit + d * .05f).coerceIn(.05f, 1f)) }
-        addAction("Пропорційний пресет") { draft = WledScreenCalibration.proportional(device.identity, device.leds); render() }
-        rows.addView(TextView(this).apply { text = "Діагностика: читає WLED заново, надсилає обмежені realtime-кадри лише до цієї MAC, потім blackout і закриває сокет." })
-        WledDiagnosticPattern.entries.forEach { pattern -> addAction(pattern.label) {
-            status.text = "Повторно перевіряю ${device.name} перед діагностикою…"
+        ScreenEdge.entries.forEach { edge -> addStepper(getString(R.string.edge_leds, UiStrings.screenEdge(this, edge)), { draft.allocation(edge).toString() }) { d -> draft = WledCalibrationEditor.changeAllocation(draft, edge, d) } }
+        ScreenEdge.entries.forEach { edge -> addStepper(getString(R.string.edge_inset, UiStrings.screenEdge(this, edge)), { getString(R.string.format_percent, draft.inset(edge)) }) { d -> draft = WledCalibrationEditor.changeInset(draft, edge, d) } }
+        addStepper(getString(R.string.sampling_depth), { getString(R.string.format_percent, draft.depthPercent) }) { d -> draft = draft.copy(depthPercent = (draft.depthPercent + d).coerceIn(2, 25)) }
+        addStepper(getString(R.string.samples_per_edge), { draft.samplesPerEdge.toString() }) { d -> draft = draft.copy(samplesPerEdge = (draft.samplesPerEdge + d * 4).coerceIn(4, 64) / 4 * 4) }
+        addStepper(getString(R.string.gamma), { getString(R.string.format_decimal, draft.gamma) }) { d -> draft = draft.copy(gamma = (draft.gamma + d * .1f).coerceIn(1f, 3.5f)) }
+        addStepper(getString(R.string.brightness_limit), { getString(R.string.format_percent, (draft.brightnessLimit * 100).toInt()) }) { d -> draft = draft.copy(brightnessLimit = (draft.brightnessLimit + d * .05f).coerceIn(.05f, 1f)) }
+        addAction(getString(R.string.proportional_preset)) { draft = WledScreenCalibration.proportional(device.identity, device.leds); render() }
+        rows.addView(TextView(this).apply { text = getString(R.string.calibration_diagnostic_description) })
+        WledDiagnosticPattern.entries.forEach { pattern -> addAction(UiStrings.diagnosticPattern(this, pattern)) {
+            status.text = getString(R.string.diagnostic_revalidating, device.name)
             work.execute {
                 val sent = runCatching { WledDiagnosticAction.execute(RuntimeSettings.snapshot(), device, draft, pattern) }.getOrDefault(false)
-                runOnUiThread { if (!isFinishing) { status.text = if (sent) "Діагностика ${pattern.label} завершена; blackout надіслано." else "WLED змінився або недоступний; діагностику не надіслано."; render() } }
+                runOnUiThread { if (!isFinishing) { status.text = if (sent) getString(R.string.diagnostic_complete, UiStrings.diagnosticPattern(this, pattern)) else getString(R.string.diagnostic_unavailable); render() } }
             }
         } }
         dialog.setOnShowListener { render() }
@@ -890,8 +927,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             val fresh = runCatching { WledDiscovery.revalidate(listOf(device)).singleOrNull() }.getOrNull()
             runOnUiThread {
                 if (!isFinishing && dialog.isShowing) physicalCount.text = if (fresh == device)
-                    "MAC: ${device.identity}\nФізичні LED: ${fresh.leds} (щойно перевірено, лише читання)\nПочаток 0 = логічний нижній-лівий."
-                else "MAC: ${device.identity}\nФізичні LED: недоступні або змінилися; тест і захоплення будуть відхилені.\nПочаток 0 = логічний нижній-лівий."
+                    getString(R.string.physical_leds_verified, device.identity, fresh.leds)
+                else getString(R.string.physical_leds_unavailable, device.identity)
             }
         }
     }
@@ -924,9 +961,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val cancelled = { generation != capturePreflightGeneration.get() || isFinishing || isDestroyed || AudioReactiveService.exists() }
         captureAdmissionLocked = true
         refreshCaptureUi()
-        status.text = "Перевіряю вибраний ${settings.outputMode.label} перед підтвердженням…"
+        status.text = getString(R.string.preflight_selected, UiStrings.outputMode(this, settings.outputMode))
         work.execute {
-            val progress: (Int) -> Unit = { attempt -> runOnUiThread { if (!cancelled()) status.text = "Перевіряю ${settings.outputMode.label}: спроба $attempt/${CapturePreflightRetry.MAX_ATTEMPTS}…" } }
+            val progress: (Int) -> Unit = { attempt -> runOnUiThread { if (!cancelled()) status.text = getString(R.string.preflight_attempt, UiStrings.outputMode(this, settings.outputMode), attempt, CapturePreflightRetry.MAX_ATTEMPTS) } }
             val wledResult = if (settings.outputMode == OutputMode.WLED) CapturePreflightRetry.bind(cancelled, progress) { WledCapturePreflight.bind(settings) } else null
             val hyperionResult = if (settings.outputMode == OutputMode.HYPERION) CapturePreflightRetry.bind(cancelled, progress) { HyperionCapturePreflight.bind(settings) } else null
             val wled = wledResult?.binding
@@ -936,7 +973,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 if (cancelled()) { WledRouteBindings.discard(wled); HyperionRouteBindings.discard(hyperion); return@runOnUiThread }
                 if (wled == null && hyperion == null) {
                     captureAdmissionLocked = false
-                    status.text = "Вибраний вихід недоступний або змінився після $attempts спроб; захоплення не розпочато."
+                    status.text = getString(R.string.preflight_failed, attempts)
                     onDenied()
                 } else {
                     pendingWled = wled
@@ -945,6 +982,16 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 }
             }
         }
+    }
+    override fun startsWithoutCaptureInputs() = RuntimeSettings.snapshot().isNoInputAnimation()
+    override fun startNoInputAnimation(admissionGeneration: Long) {
+        if (pendingAdmissionGeneration != admissionGeneration) { invalidatePendingCaptureAdmission(); return }
+        capturePreflightGeneration.incrementAndGet()
+        ContextCompat.startForegroundService(this, Intent(this, AudioReactiveService::class.java)
+            .putExtra(AudioReactiveService.EXTRA_NO_INPUT_ANIMATION, true)
+            .putExtra(AudioReactiveService.EXTRA_WLED_ROUTE_BINDING, pendingWled)
+            .putExtra(AudioReactiveService.EXTRA_HYPERION_ROUTE_BINDING, pendingHyperion)
+            .putExtra(AudioReactiveService.EXTRA_ADMISSION_GENERATION, admissionGeneration))
     }
     override fun startCapture(admissionGeneration: Long, resultCode: Int, data: Intent) {
         if (pendingAdmissionGeneration != admissionGeneration) {

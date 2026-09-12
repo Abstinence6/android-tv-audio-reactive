@@ -20,7 +20,8 @@ class AudioReactiveServiceAdmissionSourceTest {
     }
 
     @Test fun invalidProjectionAndRouteAdmissionsUseOneTerminalTeardownPath() {
-        assertTrue(source.contains("data==null){rejectInvalidStart(generation);return START_NOT_STICKY}"))
+        assertTrue(source.contains("if(!animation && (intent?.getIntExtra(EXTRA_RESULT_CODE,0)!=Activity.RESULT_OK||data==null)){rejectInvalidStart(generation);return START_NOT_STICKY}"))
+        assertTrue(source.contains("if(animation != frozen.isNoInputAnimation()){rejectInvalidStart(generation);return START_NOT_STICKY}"))
         assertTrue(source.contains("if(!valid){rejectInvalidStart(generation);return START_NOT_STICKY}"))
         assertTrue(source.contains("private fun rejectInvalidStart(generation:Long){invalidAdmissionGeneration=generation;lifecycle.stop()}"))
         assertTrue(source.contains("invalidAdmissionGeneration?.let{generation->invalidAdmissionGeneration=null;broadcastAdmissionFailed(generation)}?:broadcast()"))

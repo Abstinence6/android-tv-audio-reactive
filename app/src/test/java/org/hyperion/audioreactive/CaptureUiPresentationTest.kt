@@ -4,21 +4,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CaptureUiPresentationTest {
-    @Test fun indicatorKeepsCaptureStateAndSelectedModeVisible() {
+    @Test fun indicatorUsesLocalizedResourceIdsForCaptureState() {
         assertEquals(
-            "Захоплення: Готово · Режим: Аудіо",
-            CaptureUiPresentation.indicator(CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT, RenderMode.AUDIO),
+            R.string.status_ready,
+            CaptureUiPresentation.stateLabel(CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT),
         )
         assertEquals(
-            "Захоплення: Активне · Режим: Аудіо + відео",
-            CaptureUiPresentation.indicator(CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO, RenderMode.VIDEO_AUDIO),
+            R.string.status_active,
+            CaptureUiPresentation.stateLabel(CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO),
         )
     }
 
     @Test fun routeLossIsPresentedAsAConciseTerminalState() {
         assertEquals(
-            "Захоплення: Вихід втрачено · Режим: Відео",
-            CaptureUiPresentation.indicator(CaptureStatus.ROUTE_LOST, RenderMode.VIDEO),
+            R.string.status_route_lost,
+            CaptureUiPresentation.stateLabel(CaptureStatus.ROUTE_LOST),
         )
     }
 }

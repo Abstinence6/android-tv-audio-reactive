@@ -187,14 +187,9 @@ class AudioCoreTest {
     }
 
     @Test fun fullCurrentOfficialWledOneDimensionalReferenceCatalogIsPresentAndRendersIndependently() {
-        val required = setOf(
-            "Ripple Peak", "Gravcenter", "Gravcentric", "Gravimeter", "Gravfreq", "Juggles",
-            "Matripix", "Midnoise", "Noisefire", "Noisemeter", "Pixelwave", "Plasmoid",
-            "Puddlepeak", "Puddles", "Pixels", "Blurz", "DJ Light", "Freqmap", "Freqmatrix",
-            "Freqpixels", "Freqwave", "Noisemove", "Rocktaves", "Waterfall"
-        )
+        val required = setOf("RIPPLE_PEAK", "GRAVCENTER", "GRAVCENTRIC", "GRAVIMETER", "GRAVFREQ", "JUGGLES", "MATRIPIX", "MIDNOISE", "NOISEFIRE", "NOISEMETER", "PIXELWAVE", "PLASMOID", "PUDDLEPEAK", "PUDDLES", "PIXELS", "BLURZ", "DJ_LIGHT", "FREQMAP", "FREQMATRIX", "FREQPIXELS", "FREQWAVE", "NOISEMOVE", "ROCKTAVES", "WATERFALL")
         val referenceStyles = Effect.entries.filter { it.wled1dReferenceStyle }
-        assertEquals(required, referenceStyles.map { it.label }.toSet())
+        assertEquals(required, referenceStyles.map { it.name }.toSet())
         // WLED main's current FX.cpp registers 24 official 1D AudioReactive routines;
         // its remaining AudioReactive entries are 2D or optional particle effects.
         assertEquals(24, referenceStyles.size)

@@ -56,8 +56,18 @@ class CaptureAdmissionCoordinatorTest {
         assertEquals(2, host.preflights)
     }
 
-    private class Host(private val recordAudio: Boolean = true) : CaptureToggleCoordinator.Host {
-        var preflights = 0; var bindings = 0; var starts = 0; var projectionRequests = 0
+    @Test fun noInputAnimationStartsAfterPreflightWithoutAudioPermissionOrProjectionConsent() {
+        val host = Host(recordAudio = false, noInputAnimation = true)
+        val coordinator = CaptureToggleCoordinator(host)
+        coordinator.toggle(); val generation = host.generations.single()
+        host.ready[generation]!!.invoke()
+        assertEquals(1, host.animationStarts)
+        assertEquals(0, host.projectionRequests)
+        assertEquals(0, host.starts)
+    }
+
+    private class Host(private val recordAudio: Boolean = true, private val noInputAnimation: Boolean = false) : CaptureToggleCoordinator.Host {
+        var preflights = 0; var bindings = 0; var starts = 0; var animationStarts = 0; var projectionRequests = 0
         val generations = mutableListOf<Long>(); val ready = mutableMapOf<Long, () -> Unit>()
         override fun serviceExists() = false
         override fun hasRecordAudioPermission() = recordAudio
@@ -66,6 +76,8 @@ class CaptureAdmissionCoordinatorTest {
         override fun requestMediaProjectionConsent(generation: Long) { projectionRequests++ }
         override fun prepareOutputForCapture(generation: Long, onReady: () -> Unit, onDenied: () -> Unit) { preflights++; bindings++; generations += generation; ready[generation] = onReady }
         override fun startCapture(generation: Long, resultCode: Int, data: Intent) { starts++ }
+        override fun startsWithoutCaptureInputs() = noInputAnimation
+        override fun startNoInputAnimation(generation: Long) { animationStarts++ }
         override fun onStoppedExistingService() = Unit
         override fun onCaptureStartDenied() = Unit
         override fun onCaptureStartApproved() = Unit

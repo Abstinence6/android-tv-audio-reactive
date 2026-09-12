@@ -14,10 +14,10 @@ class ApprovedFeatureBatchTest {
     }
 
     @Test fun catalogsAreExactAndSeparatedByCaptureMode() {
-        assertEquals(listOf("Normal", "Saturation", "Contrast"), VideoEffect.entries.map { it.label })
-        assertEquals(listOf("Brightness pulse", "Beat pulse", "EQ", "Comet", "Ripple", "Bass sweep"), VideoAudioEffect.entries.map { it.label })
-        assertTrue(VideoEffectCatalog.labels(RenderMode.VIDEO).none { it in Effect.entries.map(Effect::label) })
-        assertTrue(VideoEffectCatalog.labels(RenderMode.VIDEO_AUDIO).none { it in Effect.entries.map(Effect::label) })
+        assertEquals(listOf("NORMAL", "SATURATION", "CONTRAST"), VideoEffect.entries.map { it.name })
+        assertEquals(listOf("BRIGHTNESS_PULSE", "BEAT_PULSE", "EQ", "COMET", "RIPPLE", "BASS_SWEEP", "SPECTRAL_BANDS", "CENTER_BEAT_BURST", "EDGE_PULSE", "STEREO_BALANCE", "FREQUENCY_GRADIENT", "BEAT_STROBE", "COMET_TRAILS", "BASS_WAVE", "VOCAL_FOCUS", "SILENCE_BREATHING", "ADAPTIVE_SHIMMER", "BEAT_COLOUR_TEMPERATURE"), VideoAudioEffect.entries.map { it.name })
+        assertTrue(VideoEffectCatalog.compatible(RenderMode.VIDEO, "NORMAL"))
+        assertFalse(VideoEffectCatalog.compatible(RenderMode.VIDEO, "SPECTRUM"))
     }
 
     @Test fun videoAudioOnlyAddsBrightnessAndSilenceIsVideoOnly() {
