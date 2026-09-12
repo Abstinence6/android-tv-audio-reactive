@@ -142,6 +142,19 @@ class AnimationFrameRenderer(private val frame: SourceFrameSpec) {
                     val rings = (1f - abs(((radius * 9f - time * 1.8f) % 1f) - .5f) * 10f).coerceIn(0f, 1f)
                     Triple((time * 65f + angle * 28f) % 360f, .9f, .006f + beam * (1f - radius).coerceIn(0f, 1f) * .92f + rings * .25f)
                 }
+                // Deliberately y-invariant: WLED's zone reducer preserves this as a one-dimensional strip.
+                AnimationEffect.WLED_1D_FIREWORKS -> {
+                    val phase = (time * .22f) % 1f
+                    val launch = .14f + ((tick / 41L) % 4) * .24f
+                    val rising = (1f - abs(nx - launch * (phase / .30f).coerceIn(0f, 1f)) * 18f).coerceIn(0f, 1f)
+                    val expansion = ((phase - .30f) / .70f).coerceIn(0f, 1f)
+                    val radius = .025f + expansion * .42f
+                    val left = (1f - abs(nx - (launch - radius)) * 26f).coerceIn(0f, 1f)
+                    val right = (1f - abs(nx - (launch + radius)) * 26f).coerceIn(0f, 1f)
+                    val core = (1f - abs(nx - launch) * 16f).coerceIn(0f, 1f) * (1f - expansion)
+                    val burst = if (phase < .30f) rising else maxOf(left, right, core)
+                    Triple(if (colour == AnimationColour.AUTO) 20f + expansion * 190f else baseHue, .86f, .006f + burst * (.42f + expansion * .58f))
+                }
             }
             putHsv(pixel, hue, saturation, value * brightness)
             pixel += 3
