@@ -21,6 +21,8 @@ class AnimationFrameRendererTest {
             AnimationEffect.WATER, AnimationEffect.LAKE, AnimationEffect.OCEAN,
             AnimationEffect.CANDLE, AnimationEffect.FIREPLACE, AnimationEffect.FIREWORKS,
             AnimationEffect.FIREWORK_BURSTS, AnimationEffect.SPARKLER,
+            AnimationEffect.GALAXY_SPIRAL, AnimationEffect.MATRIX_RAIN, AnimationEffect.SOLAR_FLARE,
+            AnimationEffect.CRYSTAL_CAVE, AnimationEffect.LASER_TUNNEL,
         )
         val output = effects.map { render(it, tick = 37L) }
         assertEquals(effects.size, output.map { it.toList() }.distinct().size)
@@ -32,6 +34,8 @@ class AnimationFrameRendererTest {
             AnimationEffect.WATER, AnimationEffect.LAKE, AnimationEffect.OCEAN,
             AnimationEffect.CANDLE, AnimationEffect.FIREPLACE, AnimationEffect.FIREWORKS,
             AnimationEffect.FIREWORK_BURSTS, AnimationEffect.SPARKLER,
+            AnimationEffect.GALAXY_SPIRAL, AnimationEffect.MATRIX_RAIN, AnimationEffect.SOLAR_FLARE,
+            AnimationEffect.CRYSTAL_CAVE, AnimationEffect.LASER_TUNNEL,
         ).forEach { effect ->
             assertFalse("$effect must animate", render(effect, tick = 37L).contentEquals(render(effect, tick = 81L)))
         }

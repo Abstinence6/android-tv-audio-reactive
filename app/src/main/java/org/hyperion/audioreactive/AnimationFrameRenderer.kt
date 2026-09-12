@@ -98,6 +98,50 @@ class AnimationFrameRenderer(private val frame: SourceFrameSpec) {
                 AnimationEffect.COLOUR_WAVES -> Triple(baseHue + nx * 180f + time * 70f, .82f, .2f + wave * .76f)
                 AnimationEffect.TWILIGHT -> Triple(if (colour == AnimationColour.AUTO) 255f + ny * 55f else baseHue, .62f, .10f + wave * .45f)
                 AnimationEffect.PULSE_GRID -> Triple(baseHue, .75f, if ((x + y + tick / 2) % 12 < 3) .82f else .08f)
+                // A rotating galaxy uses curved arms around a bright moving core.
+                AnimationEffect.GALAXY_SPIRAL -> {
+                    val dx = nx - .5f; val dy = ny - .5f
+                    val radius = sqrt(dx * dx + dy * dy)
+                    val angle = kotlin.math.atan2(dy, dx)
+                    val arm = ((sin(angle * 3f + radius * 24f - time * 1.8f) + 1f) * .5f)
+                    val core = (1f - radius * 3.2f).coerceIn(0f, 1f)
+                    Triple(250f + arm * 55f, .55f + arm * .35f, .01f + core * .95f + arm * (1f - radius).coerceIn(0f, 1f) * .5f)
+                }
+                // Matrix rain is independently falling green code columns with sparse bright heads.
+                AnimationEffect.MATRIX_RAIN -> {
+                    val column = (x * 37 + 11) % 29
+                    val fall = ((ny * 18f + time * (1.5f + (column % 5) * .22f) + column * .31f) % 1f)
+                    val head = (1f - fall * 11f).coerceIn(0f, 1f)
+                    val trail = (1f - fall * 2.4f).coerceIn(0f, 1f)
+                    Triple(112f + head * 18f, .72f, .008f + trail * .34f + head * .66f)
+                }
+                // Solar flare radiates hot pulses and thin arcs from a glowing centre.
+                AnimationEffect.SOLAR_FLARE -> {
+                    val dx = nx - .5f; val dy = ny - .5f
+                    val radius = sqrt(dx * dx + dy * dy)
+                    val angle = kotlin.math.atan2(dy, dx)
+                    val flare = ((sin(angle * 9f - time * 3.2f) + 1f) * .5f) * (1f - radius).coerceIn(0f, 1f)
+                    val corona = (1f - abs(radius - (.22f + sin(time * 1.4f) * .045f)) * 11f).coerceIn(0f, 1f)
+                    Triple(18f + flare * 38f, .88f, .02f + corona * .75f + flare * .45f)
+                }
+                // Crystal cave combines slowly shifting facets with cool reflected highlights.
+                AnimationEffect.CRYSTAL_CAVE -> {
+                    val facet = sin(nx * 19f + ny * 11f + time * .8f) * sin(nx * 7f - ny * 23f - time * .55f)
+                    val edge = (1f - abs(facet) * 5f).coerceIn(0f, 1f)
+                    val depth = (.18f + ny * .46f + facet * .18f).coerceIn(0f, 1f)
+                    Triple(185f + facet * 55f + edge * 30f, .58f + edge * .3f, .02f + depth * .72f + edge * .26f)
+                }
+                // Laser tunnel converges coloured beams toward a moving vanishing point.
+                AnimationEffect.LASER_TUNNEL -> {
+                    val vx = .5f + sin(time * .7f) * .16f
+                    val vy = .5f + sin(time * .9f) * .11f
+                    val dx = nx - vx; val dy = ny - vy
+                    val radius = sqrt(dx * dx + dy * dy)
+                    val angle = kotlin.math.atan2(dy, dx)
+                    val beam = (1f - abs(sin(angle * 12f + time * 2.4f)) * 8f).coerceIn(0f, 1f)
+                    val rings = (1f - abs(((radius * 9f - time * 1.8f) % 1f) - .5f) * 10f).coerceIn(0f, 1f)
+                    Triple((time * 65f + angle * 28f) % 360f, .9f, .006f + beam * (1f - radius).coerceIn(0f, 1f) * .92f + rings * .25f)
+                }
             }
             putHsv(pixel, hue, saturation, value * brightness)
             pixel += 3
