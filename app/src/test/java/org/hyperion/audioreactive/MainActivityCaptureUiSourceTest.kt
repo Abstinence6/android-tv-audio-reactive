@@ -31,6 +31,7 @@ class MainActivityCaptureUiSourceTest {
         assertTrue(source.contains("animationColourRow.visibility = if (animation) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("testButton.visibility = if (video) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("audioBox.isChecked = false; animationBox.isChecked = false"))
+        assertTrue(source.indexOf("panel.addView(silenceFadeToggle)") < source.indexOf("panel.addView(voiceInputRow)"))
         assertTrue(source.indexOf("panel.addView(silenceFadeToggle)") < source.indexOf("panel.addView(silenceBrightnessRow)"))
         assertTrue(source.contains("voiceInputRow.visibility = if (VoiceInputPolicy.shown(settings.renderMode, microphoneAvailable)) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("registerAudioDeviceCallback(voiceInputDeviceCallback, null)"))

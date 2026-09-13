@@ -1,5 +1,6 @@
 package org.hyperion.audioreactive
 
+import android.media.AudioDeviceInfo
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,5 +18,11 @@ class VoiceInputPolicyTest {
         assertFalse(VoiceInputPolicy.usable(AudioInput.MICROPHONE, false))
         assertTrue(VoiceInputPolicy.usable(AudioInput.MICROPHONE, true))
         assertTrue(VoiceInputPolicy.usable(AudioInput.PLAYBACK, false))
+    }
+
+    @Test fun builtInAndExternalVoiceInputMicrophonesAreSupported() {
+        assertTrue(VoiceInputDevices.supportedType(AudioDeviceInfo.TYPE_BUILTIN_MIC))
+        assertTrue(VoiceInputDevices.supportedType(AudioDeviceInfo.TYPE_USB_DEVICE))
+        assertFalse(VoiceInputDevices.supportedType(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER))
     }
 }

@@ -330,6 +330,14 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
         audioSection = TextView(this).apply { text = getString(R.string.audio_section) }
         panel.addView(audioSection)
+        // Keep the VIDEO_AUDIO silence control above source and general audio tuning on the TV D-pad.
+        silenceFadeToggle = CheckBox(this).apply {
+            id = View.generateViewId()
+            text = getString(R.string.silence_fade_enabled)
+            isChecked = RuntimeSettings.snapshot().silenceFadeEnabled
+            setOnCheckedChangeListener { _, enabled -> updateSilenceFadeEnabled(enabled) }
+        }
+        panel.addView(silenceFadeToggle)
         voiceInputRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
         voiceInputRow.addView(TextView(this).apply { text = getString(R.string.audio_input) })
         voiceInputSpinner = Spinner(this).apply {
@@ -355,14 +363,6 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         panel.addView(sliderRow(getString(R.string.brightness), (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
             updateBrightness(it * .05f)
         })
-        silenceFadeToggle = CheckBox(this).apply {
-            id = View.generateViewId()
-            text = getString(R.string.silence_fade_enabled)
-            isChecked = RuntimeSettings.snapshot().silenceFadeEnabled
-            setOnCheckedChangeListener { _, enabled -> updateSilenceFadeEnabled(enabled) }
-        }
-        // Keep the opt-in switch before its dependent controls in D-pad order.
-        panel.addView(silenceFadeToggle)
         silenceBrightnessRow = sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
             updateVideoAudioSilenceBrightnessFloor(it * .05f)
         }
