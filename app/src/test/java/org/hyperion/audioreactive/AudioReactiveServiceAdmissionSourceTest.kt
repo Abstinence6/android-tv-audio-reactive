@@ -48,9 +48,12 @@ class AudioReactiveServiceAdmissionSourceTest {
     @Test fun serviceOwnsOnlyTheSourcesSelectedByTheLiveMode() {
         assertTrue(source.contains("if(s.requiresAudio()&&!lifecycle.acquire(acquire={createAudio(p,s)}"))
         assertTrue(source.contains("if(s.requiresVideo()&&!createVideoWhileStarting(p)) return"))
-        assertTrue(source.contains("if(s.requiresAudio()&&recorder==null) recorder=createAudio(p,s)"))
+        assertTrue(source.contains("if(s.requiresAudio()&&recorder==null)"))
         assertTrue(source.contains("if(!s.requiresAudio()&&recorder!=null) releaseAudio()"))
-        assertTrue(source.contains("if(s.requiresVideo()&&reader==null&&!createVideo(p)) return false"))
+        assertTrue(source.contains("if(s.requiresVideo()&&reader==null&&!createVideo(p)) error"))
         assertTrue(source.contains("if(!s.requiresVideo()&&reader!=null) releaseVideo()"))
+        assertTrue(source.contains("lifecycle.whileActive"))
+        assertTrue(source.contains("frozen.requiresAudio()&&frozen.audioInput == AudioInput.MICROPHONE"))
+        assertTrue(source.contains("startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)}"))
     }
 }

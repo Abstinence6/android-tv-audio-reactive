@@ -159,4 +159,31 @@ class CaptureServiceLifecycleTest {
         assertEquals(1, results.count { it })
         assertEquals(1, results.count { !it })
     }
+
+    @Test fun stopWaitsForActiveSourceReplacementAndRejectsReplacementAfterTeardown() {
+        val activeEntered = CountDownLatch(1)
+        val allowActiveToFinish = CountDownLatch(1)
+        val cleanupDone = CountDownLatch(1)
+        val lifecycle = CaptureServiceLifecycle(cleanup = { cleanupDone.countDown() })
+        assertTrue(lifecycle.beginStart { true })
+        assertTrue(lifecycle.activate { })
+        val replacement = Thread {
+            assertTrue(lifecycle.whileActive {
+                activeEntered.countDown()
+                assertTrue(allowActiveToFinish.await(5, TimeUnit.SECONDS))
+            })
+        }
+        replacement.start()
+        assertTrue(activeEntered.await(5, TimeUnit.SECONDS))
+        val stopper = Thread { lifecycle.stop() }
+        stopper.start()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (stopper.state != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.yield()
+        assertEquals(Thread.State.BLOCKED, stopper.state)
+        assertEquals(1L, cleanupDone.count)
+        allowActiveToFinish.countDown()
+        replacement.join(5_000); stopper.join(5_000)
+        assertEquals(0L, cleanupDone.count)
+        assertFalse(lifecycle.whileActive { throw AssertionError("source replacement after stop") })
+    }
 }

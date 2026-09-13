@@ -59,6 +59,13 @@ internal class CaptureServiceLifecycle(
         true
     }
 
+    /** Serializes active-session source replacement with projection revocation and service teardown. */
+    fun whileActive(action: () -> Unit): Boolean = synchronized(monitor) {
+        if (!isActive()) return false
+        action()
+        return isActive()
+    }
+
     /** Linearizes cancellation, terminal cause selection, cleanup, and every startup action. */
     fun stop(beforeCleanup: () -> Unit = {}): Boolean = synchronized(monitor) {
         if (!teardownRequested.compareAndSet(false, true)) return false
@@ -71,4 +78,5 @@ internal class CaptureServiceLifecycle(
     }
 
     private fun isStarting() = !teardownRequested.get() && phase == Phase.STARTING
+    private fun isActive() = !teardownRequested.get() && phase == Phase.ACTIVE
 }

@@ -48,7 +48,8 @@ class AudioReactiveService : Service() {
   val valid=if(frozen.outputMode==OutputMode.HYPERION)HyperionRouteBindings.has(ids.hyperion,frozen) else WledRouteBindings.has(ids.wled,frozen)
   if(!valid){rejectInvalidStart(generation);return START_NOT_STICKY}
   // A stop between validation and foreground startup cancels the pending binding instead.
-  if(!lifecycle.whileStarting { channel(); startForeground(ID,notification(animation),if(animation) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or if(frozen.audioInput == AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0) }) { admission.discardPending(); return START_NOT_STICKY }
+  val foregroundTypes=if(animation) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if(frozen.requiresAudio()&&frozen.audioInput == AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+  if(!lifecycle.whileStarting { channel(); startForeground(ID,notification(animation),foregroundTypes) }) { admission.discardPending(); return START_NOT_STICKY }
   worker.execute { if(animation) startAnimation(frozen,generation) else start(requireNotNull(data),frozen,generation) }
   return START_NOT_STICKY
  }
@@ -99,19 +100,23 @@ class AudioReactiveService : Service() {
   return true
  }
  /** The active projection is retained while sources are reconciled; switching mode never revives a consumed consent token. */
- private fun reconcileSources(p:MediaProjection,s:AudioSettings):Boolean {
-  if(s.requiresAudio()&&recorder==null) recorder=createAudio(p,s)
+ private fun reconcileSources(p:MediaProjection,s:AudioSettings):Boolean = lifecycle.whileActive {
+  if(s.requiresAudio()&&recorder==null) {
+   if(s.audioInput==AudioInput.MICROPHONE) startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+   recorder=createAudio(p,s)
+  }
   if(!s.requiresAudio()&&recorder!=null) releaseAudio()
-  if(s.requiresVideo()&&reader==null&&!createVideo(p)) return false
+  if(s.requiresVideo()&&reader==null&&!createVideo(p)) error("video source unavailable")
   if(!s.requiresVideo()&&reader!=null) releaseVideo()
   val next=when(s.renderMode){RenderMode.AUDIO->CaptureStatus.CAPTURE_ACTIVE_AUDIO;RenderMode.VIDEO->CaptureStatus.CAPTURE_ACTIVE_VIDEO;RenderMode.VIDEO_AUDIO->CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO;RenderMode.ANIMATION->CaptureStatus.CAPTURE_ACTIVE_ANIMATION}
   if(status!=next){status=next;LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=next));broadcast()}
-  return running.get()
  }
  private fun releaseAudio(){
   val current=recorder?:return
   if(selectedVoiceInputDeviceId!=null){runCatching{(getSystemService(AUDIO_SERVICE)as AudioManager).unregisterAudioDeviceCallback(voiceInputDeviceCallback)};runCatching{current.removeOnRoutingChangedListener(voiceInputRouteListener)};selectedVoiceInputDeviceId=null}
   runCatching{current.stop()};runCatching{current.release()};recorder=null
+  // Drop the microphone FGS type as soon as a live VIDEO transition releases the microphone source.
+  runCatching{startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)}
  }
  private fun releaseVideo(){runCatching{display?.release()};display=null;runCatching{reader?.close()};reader=null}
  private fun videoLoop(initial:AudioSettings){val frameSpec=initial.liveCaptureFrame();val processor=VideoFrameProcessor(frameSpec.width,frameSpec.height);val audioRenderer=AudioToFullFrameRenderer(frameSpec);val smoother=RgbFrameSmoother(frameSpec.bytes);val samples=ShortArray(CaptureCadence.ANALYSIS_SAMPLES*2);val latestSamples=ShortArray(CaptureCadence.ANALYSIS_SAMPLES*2);val analyzer=PcmAnalyzer();val silence=AudioFeatures(0f,0f,0f,0f,0f,0f,FloatArray(AudioFeatures.BAND_COUNT),false);var features:AudioFeatures?=null;var frames=0L;val began=System.nanoTime();while(running.get()){val started=System.nanoTime();val s=LiveRendererSettings.apply(RuntimeSettings.snapshot());val p=projection?:break;if(!reconcileSources(p,s))break;if(s.requiresAudio()&&AudioRecordDrainPolicy.drainLatestFullBlock(samples,latestSamples){buffer->recorder?.read(buffer,0,buffer.size,AudioRecord.READ_NON_BLOCKING)?:0}){analyzer.configureBeatTracking(s.effectParameters.beatThreshold,started);features=analyzer.analyzeStereo(latestSamples,latestSamples.size,s.sensitivity,s.effectParameters.beatThreshold,started)} else if(!s.requiresAudio()) features=null;var sent=true;if(!s.requiresVideo()){val raw=audioRenderer.render(s.effect,features?:silence,s.brightness,frames,s.effectParameters);sent=sendFrame(smoother.apply(raw,FrameSmoothingPolicy.immediateBlack(s.brightness,features?.signalPresent==true)),features,began,++frames,started,s)}else{val captureReader=reader?:break;when(FreshFrameDispatcher.dispatch(acquireLatest={captureReader.acquireLatestImage()},release={it.close()},render={fresh->if(processor.copyImage(fresh))processor.compose(features,s,started)else null},send={raw->val frame=smoother.apply(raw,FrameSmoothingPolicy.immediateBlack(s,features?.signalPresent));sent=sendFrame(frame,features,began,++frames,started,s)})){FreshFrameDispatcher.Result.NO_FRESH_FRAME->Unit;FreshFrameDispatcher.Result.SENT->Unit;FreshFrameDispatcher.Result.RENDER_REJECTED->{status=CaptureStatus.VIDEO_UNAVAILABLE_OR_PROTECTED;VideoCaptureFailurePolicy.blackoutAndTerminate{router?.stop();router=null};broadcast();break}}};if(!sent)break;sleep(started,s.fps)};stop()}
