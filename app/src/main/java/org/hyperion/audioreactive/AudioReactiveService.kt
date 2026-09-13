@@ -25,7 +25,9 @@ class AudioReactiveService : Service() {
   @Volatile private var alive=false; @Volatile private var status=CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT
   fun exists()=alive; fun captureStatus()=status; fun stopExisting(context:android.content.Context){if(alive)context.stopService(Intent(context,AudioReactiveService::class.java))}
  }
- private val running=AtomicBoolean(); private val worker=Executors.newSingleThreadExecutor(); private var projection:MediaProjection?=null; private var recorder:AudioRecord?=null; private var reader:ImageReader?=null; private var display:android.hardware.display.VirtualDisplay?=null; private var router:OutputRouter?=null; private var invalidAdmissionGeneration:Long?=null
+ private val running=AtomicBoolean(); private val worker=Executors.newSingleThreadExecutor(); private var projection:MediaProjection?=null; private var recorder:AudioRecord?=null; private var reader:ImageReader?=null; private var display:android.hardware.display.VirtualDisplay?=null; private var router:OutputRouter?=null; private var invalidAdmissionGeneration:Long?=null; private var selectedVoiceInputDeviceId:Int?=null
+ private val voiceInputDeviceCallback=object:AudioDeviceCallback(){override fun onAudioDevicesRemoved(removed:Array<out AudioDeviceInfo>){if(VoiceInputRoutePolicy.selectedDeviceWasRemoved(selectedVoiceInputDeviceId,removed.map{it.id}))terminateVoiceInputLost()}}
+ private val voiceInputRouteListener=AudioRouting.OnRoutingChangedListener{routing->if(VoiceInputRoutePolicy.routedAwayFromSelectedDevice(selectedVoiceInputDeviceId,(routing as? AudioRecord)?.routedDevice?.id))terminateVoiceInputLost()}
  private val admission = ServiceRouteAdmission(::discardRouteBindings)
  private val lifecycle = CaptureServiceLifecycle(::performTeardown)
  override fun onBind(intent:Intent?):IBinder?=null
@@ -46,7 +48,7 @@ class AudioReactiveService : Service() {
   val valid=if(frozen.outputMode==OutputMode.HYPERION)HyperionRouteBindings.has(ids.hyperion,frozen) else WledRouteBindings.has(ids.wled,frozen)
   if(!valid){rejectInvalidStart(generation);return START_NOT_STICKY}
   // A stop between validation and foreground startup cancels the pending binding instead.
-  if(!lifecycle.whileStarting { channel(); startForeground(ID,notification(animation),if(animation) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) }) { admission.discardPending(); return START_NOT_STICKY }
+  if(!lifecycle.whileStarting { channel(); startForeground(ID,notification(animation),if(animation) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or if(frozen.audioInput == AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0) }) { admission.discardPending(); return START_NOT_STICKY }
   worker.execute { if(animation) startAnimation(frozen,generation) else start(requireNotNull(data),frozen,generation) }
   return START_NOT_STICKY
  }
@@ -62,7 +64,7 @@ class AudioReactiveService : Service() {
    )) return
    val p=projection?:return
    if(!lifecycle.whileStarting { p.registerCallback(object:MediaProjection.Callback(){override fun onStop(){stop()}},null) }) return
-   if(!lifecycle.acquire(acquire={createAudio(p)},release={it.stop();it.release()},assign={recorder=it})) return
+   if(!lifecycle.acquire(acquire={createAudio(p,s)},release={it.stop();it.release()},assign={recorder=it})) return
    if(!createVideo(p)) return
    if(!lifecycle.acquire(acquire={ admission.consume { ids -> OutputRouter.create(s,ids.wled,ids.hyperion) } },release={it.stop()},assign={router=it})) return
    if(!lifecycle.activate {
@@ -85,7 +87,7 @@ class AudioReactiveService : Service() {
    animationLoop(s)
   } catch(failure:Exception) { Log.w(TAG, "$STARTUP_FAILURE_DIAGNOSTIC (${failure.javaClass.simpleName})"); status=CaptureStatus.ROUTER_INIT_FAILED; LocalStatusStore.reset(status); broadcastAdmissionFailed(generation); broadcast(); stop() }
  }
- private fun createAudio(p:MediaProjection):AudioRecord { if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)error("audio permission"); val min=AudioRecord.getMinBufferSize(48000,AudioFormat.CHANNEL_IN_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(8192); return AudioRecord.Builder().setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(48000).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build()).setBufferSizeInBytes(min).setAudioPlaybackCaptureConfig(AudioPlaybackCaptureConfiguration.Builder(p).addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME).build()).build().also{it.startRecording()} }
+ private fun createAudio(p:MediaProjection,s:AudioSettings):AudioRecord { if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)error("audio permission"); val min=AudioRecord.getMinBufferSize(48000,AudioFormat.CHANNEL_IN_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(8192); val builder=AudioRecord.Builder().setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(48000).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build()).setBufferSizeInBytes(min); if(s.audioInput==AudioInput.MICROPHONE){val microphone=VoiceInputDevices.connected(this)?:error("microphone disconnected"); selectedVoiceInputDeviceId=microphone.id; val record=builder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION).build(); if(!record.setPreferredDevice(microphone)){record.release();selectedVoiceInputDeviceId=null;error("microphone route unavailable")}; record.addOnRoutingChangedListener(voiceInputRouteListener,null); (getSystemService(AUDIO_SERVICE)as AudioManager).registerAudioDeviceCallback(voiceInputDeviceCallback,null); record.startRecording(); return record}; return builder.setAudioPlaybackCaptureConfig(AudioPlaybackCaptureConfiguration.Builder(p).addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME).build()).build().also{it.startRecording()} }
  private fun createVideo(p:MediaProjection):Boolean {
   if(!lifecycle.acquire(acquire={ImageReader.newInstance(320,180,android.graphics.PixelFormat.RGBA_8888,VideoLatencyPolicy.IMAGE_READER_MAX_IMAGES)},release={it.close()},assign={reader=it})) return false
   val captureReader=reader?:return false
@@ -119,12 +121,16 @@ class AudioReactiveService : Service() {
   if(!running.get()){restored.stop();return false}; router=restored; return true
  }
  private fun terminateRouteLost(){ lifecycle.stop { status=CaptureStatus.ROUTE_LOST; LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status,lastSendSucceeded=false)) } }
+ private fun terminateVoiceInputLost(){ lifecycle.stop { status=CaptureStatus.MICROPHONE_ROUTE_LOST; LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status,lastSendSucceeded=false)) } }
  private fun sleep(start:Long,fps:Int){val n=CaptureCadence.remainingSleepNanos(start,System.nanoTime(),fps);if(n>0)Thread.sleep(n/1_000_000L,(n%1_000_000L).toInt())}
  private fun stop(){ lifecycle.stop() }
  private fun performTeardown(){
   val failures=mutableListOf<String>()
   fun attempt(name:String,action:()->Unit){try{action()}catch(_:Exception){failures+=name}}
   attempt("running"){running.set(false)}
+  attempt("voice device callback"){(getSystemService(AUDIO_SERVICE)as AudioManager).unregisterAudioDeviceCallback(voiceInputDeviceCallback)}
+  attempt("voice route callback"){recorder?.removeOnRoutingChangedListener(voiceInputRouteListener)}
+  attempt("voice device"){selectedVoiceInputDeviceId=null}
   // A consumed router owns its route until stopped; only then can admission be reopened.
   attempt("router"){router?.stop();router=null}
   attempt("admission"){admission.finish();OutputDiagnosticAdmission.releaseCapture()}

@@ -6,6 +6,8 @@ enum class CaptureStatus(val isActive: Boolean = false) {
     AUDIO_RECORD_INIT_FAILED, AUDIO_RECORD_START_FAILED, AUDIO_RECORD_INIT_TIMEOUT, ROUTER_INIT_FAILED,
     ROUTE_LOST, CAPTURE_ACTIVE(true), CAPTURE_ACTIVE_AUDIO(true), CAPTURE_ACTIVE_VIDEO(true),
     CAPTURE_ACTIVE_VIDEO_AUDIO(true), CAPTURE_ACTIVE_ANIMATION(true), VIDEO_UNAVAILABLE_OR_PROTECTED(true),
+    /** A selected external microphone was removed or AudioRecord routed away; capture was stopped. */
+    MICROPHONE_ROUTE_LOST,
 }
 
 /**

@@ -19,4 +19,16 @@ class AudioReactiveServiceAudioDrainSourceTest {
         assertTrue(source.contains("AudioRecord.READ_NON_BLOCKING"))
         assertFalse(source.contains("analyzer.analyze(samples,n,s.sensitivity)"))
     }
+
+    @Test fun connectedMicrophoneUsesVoiceRecognitionAndAnExplicitPreferredDevice() {
+        assertTrue(source.contains("s.audioInput==AudioInput.MICROPHONE"))
+        assertTrue(source.contains("VoiceInputDevices.connected(this)?:error(\"microphone disconnected\")"))
+        assertTrue(source.contains("setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)"))
+        assertTrue(source.contains("record.setPreferredDevice(microphone)"))
+        assertTrue(source.contains("record.addOnRoutingChangedListener(voiceInputRouteListener,null)"))
+        assertTrue(source.contains("registerAudioDeviceCallback(voiceInputDeviceCallback,null)"))
+        assertTrue(source.contains("unregisterAudioDeviceCallback(voiceInputDeviceCallback)"))
+        assertTrue(source.contains("removeOnRoutingChangedListener(voiceInputRouteListener)"))
+        assertTrue(source.contains("private fun terminateVoiceInputLost(){ lifecycle.stop { status=CaptureStatus.MICROPHONE_ROUTE_LOST"))
+    }
 }

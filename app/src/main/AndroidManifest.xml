@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
@@ -48,7 +49,7 @@
         <!-- Internal-only capture toggle.  No third-party caller can repeatedly invoke consent/preflight. -->
         <activity android:name=".CaptureToggleActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" />
 
-        <service android:name=".AudioReactiveService" android:exported="false" android:foregroundServiceType="mediaProjection|dataSync" />
+        <service android:name=".AudioReactiveService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone|dataSync" />
         <!-- App-launch control availability only: no boot receiver or sticky restart. -->
         <service android:name=".MqttControlService" android:exported="false" android:foregroundServiceType="connectedDevice" />
 

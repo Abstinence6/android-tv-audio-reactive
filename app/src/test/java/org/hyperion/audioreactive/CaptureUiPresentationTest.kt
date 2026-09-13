@@ -20,5 +20,9 @@ class CaptureUiPresentationTest {
             R.string.status_route_lost,
             CaptureUiPresentation.stateLabel(CaptureStatus.ROUTE_LOST),
         )
+        assertEquals(
+            R.string.status_microphone_lost,
+            CaptureUiPresentation.stateLabel(CaptureStatus.MICROPHONE_ROUTE_LOST),
+        )
     }
 }

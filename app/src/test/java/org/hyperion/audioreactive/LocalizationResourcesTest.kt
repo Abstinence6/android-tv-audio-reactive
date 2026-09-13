@@ -44,6 +44,7 @@ class LocalizationResourcesTest {
             "screen_edge_labels" to ScreenEdge.entries.size,
             "perimeter_direction_labels" to PerimeterDirection.entries.size,
             "capture_status_texts" to CaptureStatus.entries.size,
+            "audio_input_labels" to AudioInput.entries.size,
             "effect_labels" to Effect.entries.size,
         )
         expected.forEach { (name, count) -> assertEquals("$name ordinal mapping", count, english.byName(name).values.size) }

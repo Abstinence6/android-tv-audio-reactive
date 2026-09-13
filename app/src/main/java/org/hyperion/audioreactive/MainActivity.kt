@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
+import android.media.AudioManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.view.Gravity
@@ -50,6 +52,7 @@ object CaptureUiPresentation {
         CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT -> R.string.status_ready
         CaptureStatus.PREPARING_PROJECTION, CaptureStatus.PREPARING_AUDIO_RECORD, CaptureStatus.PREPARING_ANIMATION -> R.string.status_preparing
         CaptureStatus.ROUTE_LOST -> R.string.status_route_lost
+        CaptureStatus.MICROPHONE_ROUTE_LOST -> R.string.status_microphone_lost
         CaptureStatus.ROUTER_INIT_FAILED, CaptureStatus.AUDIO_RECORD_INIT_FAILED,
         CaptureStatus.AUDIO_RECORD_START_FAILED, CaptureStatus.AUDIO_RECORD_INIT_TIMEOUT -> R.string.status_start_failed
         CaptureStatus.VIDEO_UNAVAILABLE_OR_PROTECTED -> R.string.status_video_unavailable
@@ -72,6 +75,10 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private val capturePreflightGeneration = AtomicLong()
     private val discoveryAdmissionGeneration = AtomicLong()
     private val rainbowHandler = Handler(Looper.getMainLooper())
+    private val voiceInputDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>) = refreshConditionalControls()
+        override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>) = refreshConditionalControls()
+    }
     private var rainbowHue = 0f
     private var movingPatternPhase = 0f
     private var movingBarsDrawable: LocalVisualPatternDrawable? = null
@@ -112,6 +119,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private lateinit var qualityRow: LinearLayout
     private lateinit var videoFpsRow: LinearLayout
     private lateinit var audioSection: TextView
+    private lateinit var voiceInputRow: LinearLayout
+    private lateinit var voiceInputSpinner: Spinner
     private lateinit var sensitivityRow: LinearLayout
     private lateinit var silenceBrightnessRow: LinearLayout
     private lateinit var silenceFadeToggle: CheckBox
@@ -231,7 +240,12 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                 suppressModeCallbacks = true
                 audioBox.isChecked = false; videoBox.isChecked = false
                 suppressModeCallbacks = false
-            } else if (checked && (changed === audioBox || changed === videoBox)) {
+            } else if (checked && changed === videoBox) {
+                // A direct VIDEO selection must be usable from the default AUDIO selection; AUDIO can be re-enabled to request VIDEO_AUDIO.
+                suppressModeCallbacks = true
+                audioBox.isChecked = false; animationBox.isChecked = false
+                suppressModeCallbacks = false
+            } else if (checked && changed === audioBox) {
                 suppressModeCallbacks = true
                 animationBox.isChecked = false
                 suppressModeCallbacks = false
@@ -316,6 +330,24 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
         audioSection = TextView(this).apply { text = getString(R.string.audio_section) }
         panel.addView(audioSection)
+        voiceInputRow = LinearLayout(this).apply { id = View.generateViewId(); orientation = LinearLayout.VERTICAL }
+        voiceInputRow.addView(TextView(this).apply { text = getString(R.string.audio_input) })
+        voiceInputSpinner = Spinner(this).apply {
+            id = View.generateViewId()
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, resources.getStringArray(R.array.audio_input_labels).toList())
+            setSelection(RuntimeSettings.snapshot().audioInput.ordinal, false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (!AudioReactiveService.exists()) AudioInput.entries.getOrNull(position)?.let { input ->
+                        if (VoiceInputPolicy.usable(input, VoiceInputDevices.connected(this@MainActivity) != null)) RuntimeSettings.update { it.copy(audioInput = input) }
+                    }
+                }
+            }
+        }
+        voiceInputRow.addView(voiceInputSpinner)
+        panel.addView(voiceInputRow)
+        modeMutableRows += voiceInputRow
         sensitivityRow = sliderRow(getString(R.string.sensitivity), ((RuntimeSettings.snapshot().sensitivity - .25f) / .05f).toInt(), 60, true, { SliderFormatters.sensitivity(this, .25f + it * .05f) }) {
             updateSensitivity(.25f + it * .05f)
         }
@@ -323,17 +355,18 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         panel.addView(sliderRow(getString(R.string.brightness), (RuntimeSettings.snapshot().brightness / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
             updateBrightness(it * .05f)
         })
-        silenceBrightnessRow = sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
-            updateVideoAudioSilenceBrightnessFloor(it * .05f)
-        }
-        panel.addView(silenceBrightnessRow)
         silenceFadeToggle = CheckBox(this).apply {
             id = View.generateViewId()
             text = getString(R.string.silence_fade_enabled)
             isChecked = RuntimeSettings.snapshot().silenceFadeEnabled
             setOnCheckedChangeListener { _, enabled -> updateSilenceFadeEnabled(enabled) }
         }
+        // Keep the opt-in switch before its dependent controls in D-pad order.
         panel.addView(silenceFadeToggle)
+        silenceBrightnessRow = sliderRow(getString(R.string.silence_brightness), (RuntimeSettings.snapshot().videoAudioSilenceBrightnessFloor / .05f).toInt(), 20, true, { SliderFormatters.brightness(this, it * .05f) }) {
+            updateVideoAudioSilenceBrightnessFloor(it * .05f)
+        }
+        panel.addView(silenceBrightnessRow)
         silenceHoldRow = sliderRow(getString(R.string.silence_hold), RuntimeSettings.snapshot().silenceHoldMillis / 100, 30, true, { getString(R.string.milliseconds, it * 100) }) { updateSilenceHoldMillis(it * 100) }
         panel.addView(silenceHoldRow)
         silenceFadeRow = sliderRow(getString(R.string.silence_fade), (RuntimeSettings.snapshot().silenceFadeMillis - 100) / 100, 19, true, { getString(R.string.milliseconds, 100 + it * 100) }) { updateSilenceFadeMillis(100 + it * 100) }
@@ -645,7 +678,12 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
 
     private fun refreshConditionalControls() {
-        val settings = effectiveRenderSettings()
+        var settings = effectiveRenderSettings()
+        val microphoneAvailable = VoiceInputDevices.connected(this) != null
+        if (!microphoneAvailable && settings.audioInput == AudioInput.MICROPHONE && !AudioReactiveService.exists()) {
+            RuntimeSettings.update { it.copy(audioInput = AudioInput.PLAYBACK) }
+            settings = effectiveRenderSettings()
+        }
         val video = TvUiStatePolicy.showVideoControls(settings.renderMode)
         val audio = TvUiStatePolicy.showAudioControls(settings.renderMode)
         val mixed = TvUiStatePolicy.showVideoAudioControls(settings.renderMode)
@@ -653,6 +691,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         testButton.visibility = if (video) View.VISIBLE else View.GONE
         qualityRow.visibility = if (video) View.VISIBLE else View.GONE
         audioSection.visibility = if (audio) View.VISIBLE else View.GONE
+        voiceInputRow.visibility = if (VoiceInputPolicy.shown(settings.renderMode, microphoneAvailable)) View.VISIBLE else View.GONE
+        if (voiceInputSpinner.selectedItemPosition != settings.audioInput.ordinal) voiceInputSpinner.setSelection(settings.audioInput.ordinal, false)
         sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE
         silenceFadeToggle.visibility = if (mixed) View.VISIBLE else View.GONE
         if (silenceFadeToggle.isChecked != settings.silenceFadeEnabled) silenceFadeToggle.isChecked = settings.silenceFadeEnabled
@@ -677,6 +717,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         videoFpsRow.visibility = View.VISIBLE
         zonesRow.visibility = if (TvUiStatePolicy.showWledZones(settings.outputMode)) View.VISIBLE else View.GONE
     }
+
 
     private fun effectiveRenderSettings(): AudioSettings =
         EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), AudioReactiveService.exists())
@@ -714,7 +755,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     }
 
     override fun onStart() { super.onStart(); ContextCompat.registerReceiver(this, receiver, IntentFilter(AudioReactiveService.ACTION_CAPTURE_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED) }
-    override fun onResume() { super.onResume(); refreshCaptureUi(true); releaseUpdater.resumePendingInstall() }
+    override fun onResume() { super.onResume(); (getSystemService(AUDIO_SERVICE) as AudioManager).registerAudioDeviceCallback(voiceInputDeviceCallback, null); refreshCaptureUi(true); releaseUpdater.resumePendingInstall() }
+    override fun onPause() { (getSystemService(AUDIO_SERVICE) as AudioManager).unregisterAudioDeviceCallback(voiceInputDeviceCallback); super.onPause() }
     override fun onStop() { unregisterReceiver(receiver); super.onStop() }
     override fun onDestroy() { invalidatePendingCaptureAdmission(); captureToggleCoordinator.invalidatePending(); rainbowHandler.removeCallbacks(rainbowAnimator); rainbowHandler.removeCallbacks(movingBarsAnimator); RainbowVisualSourcePolicy.stop(); releaseUpdater.close(); work.shutdownNow(); super.onDestroy() }
     private fun handleCaptureToggle() {

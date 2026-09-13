@@ -29,7 +29,7 @@ class AudioReactiveServiceAdmissionSourceTest {
 
     @Test fun serviceChecksCancellationAroundEachCaptureAcquire() {
         assertTrue(source.contains("lifecycle.acquire(\n     acquire = { (getSystemService"))
-        assertTrue(source.contains("lifecycle.acquire(acquire={createAudio(p)}"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={createAudio(p,s)}"))
         assertTrue(source.contains("lifecycle.acquire(acquire={ImageReader.newInstance"))
         assertTrue(source.contains("lifecycle.acquire(acquire={p.createVirtualDisplay"))
         assertTrue(source.contains("lifecycle.acquire(acquire={ admission.consume"))
