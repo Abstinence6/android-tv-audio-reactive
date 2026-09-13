@@ -29,6 +29,7 @@ class MainActivityCaptureUiSourceTest {
         assertTrue(source.contains("silenceFadeToggle.visibility = if (mixed) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("silenceBrightnessRow.visibility = if (mixed && settings.silenceFadeEnabled) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("animationColourRow.visibility = if (animation) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("testButton.visibility = if (video) View.VISIBLE else View.GONE"))
     }
 
     @Test fun singleScreenUsesCompactIndicatorAndKeepsOnlyLocalMaintenanceActions() {

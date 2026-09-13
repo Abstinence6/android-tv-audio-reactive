@@ -650,6 +650,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val audio = TvUiStatePolicy.showAudioControls(settings.renderMode)
         val mixed = TvUiStatePolicy.showVideoAudioControls(settings.renderMode)
         val animation = TvUiStatePolicy.showAnimationControls(settings.renderMode)
+        testButton.visibility = if (video) View.VISIBLE else View.GONE
         qualityRow.visibility = if (video) View.VISIBLE else View.GONE
         audioSection.visibility = if (audio) View.VISIBLE else View.GONE
         sensitivityRow.visibility = if (audio) View.VISIBLE else View.GONE
