@@ -4,8 +4,9 @@ package org.hyperion.audioreactive
 internal object CaptureTogglePolicy {
     enum class Action { STOP_EXISTING, REQUEST_RECORD_AUDIO, REQUEST_MEDIA_PROJECTION, START_CAPTURE, FINISH_WITHOUT_CAPTURE }
 
-    fun actionFor(serviceExists: Boolean, recordAudioGranted: Boolean): Action = when {
+    fun actionFor(serviceExists: Boolean, requiresAudio: Boolean, recordAudioGranted: Boolean): Action = when {
         serviceExists -> Action.STOP_EXISTING
+        !requiresAudio -> Action.REQUEST_MEDIA_PROJECTION
         recordAudioGranted -> Action.REQUEST_MEDIA_PROJECTION
         else -> Action.REQUEST_RECORD_AUDIO
     }

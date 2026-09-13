@@ -44,4 +44,13 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("stopForeground(STOP_FOREGROUND_REMOVE)"))
         assertTrue(source.contains("attempt(\"self\"){stopSelf()}"))
     }
+
+    @Test fun serviceOwnsOnlyTheSourcesSelectedByTheLiveMode() {
+        assertTrue(source.contains("if(s.requiresAudio()&&!lifecycle.acquire(acquire={createAudio(p,s)}"))
+        assertTrue(source.contains("if(s.requiresVideo()&&!createVideoWhileStarting(p)) return"))
+        assertTrue(source.contains("if(s.requiresAudio()&&recorder==null) recorder=createAudio(p,s)"))
+        assertTrue(source.contains("if(!s.requiresAudio()&&recorder!=null) releaseAudio()"))
+        assertTrue(source.contains("if(s.requiresVideo()&&reader==null&&!createVideo(p)) return false"))
+        assertTrue(source.contains("if(!s.requiresVideo()&&reader!=null) releaseVideo()"))
+    }
 }

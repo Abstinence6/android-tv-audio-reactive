@@ -11,6 +11,7 @@ internal class CaptureToggleCoordinator(private val host: Host) {
     interface Host {
         fun serviceExists(): Boolean
         fun hasRecordAudioPermission(): Boolean
+        fun requiresRecordAudio(): Boolean = true
         fun stopExistingService()
         fun requestRecordAudioPermission(generation: Long)
         fun requestMediaProjectionConsent(generation: Long)
@@ -38,7 +39,7 @@ internal class CaptureToggleCoordinator(private val host: Host) {
                     if (host.startsWithoutCaptureInputs()) {
                         host.startNoInputAnimation(request)
                         host.onCaptureStartApproved()
-                    } else dispatch(CaptureTogglePolicy.actionFor(false, host.hasRecordAudioPermission()), request)
+                    } else dispatch(CaptureTogglePolicy.actionFor(false, host.requiresRecordAudio(), host.hasRecordAudioPermission()), request)
                 } },
                 onDenied = { if (current(request)) deny() },
             )

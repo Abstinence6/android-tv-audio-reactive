@@ -12,10 +12,10 @@ import kotlin.math.sin
 
 class AudioCoreTest {
     @Test fun idleToggleStartsOnlyTheExistingPermissionAndProjectionFlow() =
-        assertEquals(CaptureTogglePolicy.Action.REQUEST_RECORD_AUDIO, CaptureTogglePolicy.actionFor(false, false))
+        assertEquals(CaptureTogglePolicy.Action.REQUEST_RECORD_AUDIO, CaptureTogglePolicy.actionFor(false, true, false))
 
     @Test fun activeToggleStopsOnlyAnExistingService() {
-        assertEquals(CaptureTogglePolicy.Action.STOP_EXISTING, CaptureTogglePolicy.actionFor(true, false))
+        assertEquals(CaptureTogglePolicy.Action.STOP_EXISTING, CaptureTogglePolicy.actionFor(true, true, false))
         assertTrue(ServiceStopPolicy.shouldStopExistingService(true))
     }
 

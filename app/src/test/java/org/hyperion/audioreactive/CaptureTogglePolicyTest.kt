@@ -7,25 +7,32 @@ class CaptureTogglePolicyTest {
     @Test fun activeServiceStopsWithoutAnyPermissionOrCaptureStartAction() {
         assertEquals(
             CaptureTogglePolicy.Action.STOP_EXISTING,
-            CaptureTogglePolicy.actionFor(serviceExists = true, recordAudioGranted = false),
+            CaptureTogglePolicy.actionFor(serviceExists = true, requiresAudio = true, recordAudioGranted = false),
         )
         assertEquals(
             CaptureTogglePolicy.Action.STOP_EXISTING,
-            CaptureTogglePolicy.actionFor(serviceExists = true, recordAudioGranted = true),
+            CaptureTogglePolicy.actionFor(serviceExists = true, requiresAudio = true, recordAudioGranted = true),
         )
     }
 
-    @Test fun inactiveWithoutRecordAudioRequestsOnlyRuntimePermission() {
+    @Test fun inactiveAudioModeWithoutRecordAudioRequestsOnlyRuntimePermission() {
         assertEquals(
             CaptureTogglePolicy.Action.REQUEST_RECORD_AUDIO,
-            CaptureTogglePolicy.actionFor(serviceExists = false, recordAudioGranted = false),
+            CaptureTogglePolicy.actionFor(serviceExists = false, requiresAudio = true, recordAudioGranted = false),
         )
     }
 
-    @Test fun inactiveWithRecordAudioRequestsSystemProjectionConsentNotCaptureStart() {
+    @Test fun inactiveAudioModeWithRecordAudioRequestsSystemProjectionConsentNotCaptureStart() {
         assertEquals(
             CaptureTogglePolicy.Action.REQUEST_MEDIA_PROJECTION,
-            CaptureTogglePolicy.actionFor(serviceExists = false, recordAudioGranted = true),
+            CaptureTogglePolicy.actionFor(serviceExists = false, requiresAudio = true, recordAudioGranted = true),
+        )
+    }
+
+    @Test fun videoOnlySkipsRecordAudioPermissionAndRequestsOnlyProjectionConsent() {
+        assertEquals(
+            CaptureTogglePolicy.Action.REQUEST_MEDIA_PROJECTION,
+            CaptureTogglePolicy.actionFor(serviceExists = false, requiresAudio = false, recordAudioGranted = false),
         )
     }
 

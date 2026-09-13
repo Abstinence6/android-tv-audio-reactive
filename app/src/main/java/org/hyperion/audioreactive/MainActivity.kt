@@ -906,6 +906,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     override fun serviceExists() = AudioReactiveService.exists()
     override fun hasRecordAudioPermission() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    override fun requiresRecordAudio() = RuntimeSettings.snapshot().requiresAudio()
     override fun stopExistingService() = AudioReactiveService.stopExisting(this)
     override fun requestRecordAudioPermission(generation: Long) {
         pendingPermissionGeneration = generation
