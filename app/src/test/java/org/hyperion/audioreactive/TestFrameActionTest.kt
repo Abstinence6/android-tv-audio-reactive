@@ -12,7 +12,7 @@ class TestFrameActionTest {
     private val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "Desk", "192.168.1.158", 19444, 19400)
 
     @Test fun wledTestRequiresFreshPreflightAndConsumesItsBindingOnce() {
-        val settings = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity))
+        val settings = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity), wledCalibrations = listOf(WledScreenCalibration.proportional(wled.identity, wled.leds)))
         var preflightCalls = 0
         var sent: List<WledDevice>? = null
         val result = TestFrameAction.execute(
@@ -46,7 +46,7 @@ class TestFrameActionTest {
     }
 
     @Test fun testActionDoesNotNeedCaptureEligibilityOrProjectionState() {
-        val settings = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity))
+        val settings = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity), wledCalibrations = listOf(WledScreenCalibration.proportional(wled.identity, wled.leds)))
         // The only injected behavior is preflight plus direct frame send: no permission, service, or projection seam exists.
         assertTrue(TestFrameAction.execute(settings, wledPreflight = { current -> WledCapturePreflight.bind(current) { listOf(wled) } }, wledSender = { _, _ -> Unit }))
     }

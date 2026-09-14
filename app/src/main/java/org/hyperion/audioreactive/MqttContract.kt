@@ -274,7 +274,7 @@ object MqttSettingsPolicy {
 /** Active MQTT edits never rebuild a route, alter endpoints, or change capture resources. */
 object LiveMqttSettingsPolicy {
     const val BLOCKED_DETAIL = "setting blocked: stop and restart capture for WLED video preflight"
-    private val liveFields = setOf("effect", "brightness", "sensitivity", "render_mode", "video_audio_silence_brightness_floor", "silence_hold_millis", "silence_fade_millis", "video_effect", "video_audio_effect", "video_saturation_percent", "speed", "trail", "beat_threshold", "hue_shift")
+    private val liveFields = setOf("effect", "brightness", "sensitivity", "video_audio_silence_brightness_floor", "silence_hold_millis", "silence_fade_millis", "video_effect", "video_audio_effect", "video_saturation_percent", "speed", "trail", "beat_threshold", "hue_shift")
 
     fun apply(base: AudioSettings, update: MqttContract.Command.SetSetting): Boolean {
         if (update.field !in liveFields) return false
@@ -283,7 +283,6 @@ object LiveMqttSettingsPolicy {
             "effect" -> LiveRendererSettings.setEffect(next.effect)
             "brightness" -> LiveRendererSettings.setBrightness(next.brightness)
             "sensitivity" -> LiveRendererSettings.setSensitivity(next.sensitivity)
-            "render_mode" -> return LiveRendererSettings.setRenderMode(next.renderMode)
             "video_audio_silence_brightness_floor" -> {
                 val live = LiveRendererSettings.apply(base)
                 LiveRendererSettings.setVideoAudioSilenceBrightnessFloor(next.videoAudioSilenceBrightnessFloor.coerceAtMost(live.brightness), live.brightness)

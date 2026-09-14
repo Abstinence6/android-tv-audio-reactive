@@ -40,8 +40,8 @@ class VideoModePolicyTest {
     @Test fun everyCrossingOfTheAnimationInputBoundaryRequiresAStopAndFreshAdmission() {
         val inputModes = listOf(RenderMode.AUDIO, RenderMode.VIDEO, RenderMode.VIDEO_AUDIO)
         inputModes.forEach { input ->
-            assertTrue("animation -> $input", AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.ANIMATION, input))
-            assertTrue("$input -> animation", AnimationModeTransitionPolicy.requiresRestart(true, input, RenderMode.ANIMATION))
+            assertFalse("live service must not restart: $input", AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.ANIMATION, input))
+            assertFalse("live service must not restart: $input", AnimationModeTransitionPolicy.requiresRestart(true, input, RenderMode.ANIMATION))
             assertFalse("inactive animation -> $input", AnimationModeTransitionPolicy.requiresRestart(false, RenderMode.ANIMATION, input))
         }
         assertFalse(AnimationModeTransitionPolicy.requiresRestart(true, RenderMode.AUDIO, RenderMode.VIDEO_AUDIO))
@@ -116,7 +116,7 @@ class VideoModePolicyTest {
         assertEquals(RenderMode.AUDIO, audio.mode); assertEquals(RenderMode.VIDEO, video.mode); assertEquals(RenderMode.VIDEO_AUDIO, both.mode)
         assertTrue(rejected.rejected); assertTrue(rejected.audioChecked); assertTrue(rejected.videoChecked)
         LiveRendererSettings.begin(AudioSettings.defaults())
-        try { LiveRendererSettings.setRenderMode(RenderMode.VIDEO); assertEquals(RenderMode.VIDEO, LiveRendererSettings.apply(AudioSettings.defaults()).renderMode) } finally { LiveRendererSettings.end() }
+        try { LiveRendererSettings.commitRenderMode(RenderMode.VIDEO); assertEquals(RenderMode.VIDEO, LiveRendererSettings.apply(AudioSettings.defaults()).renderMode) } finally { LiveRendererSettings.end() }
     }
 
     @Test fun liveCaptureFrameIsStableAcrossInputTransitionsAndLatencyPolicySendsOnlyFreshImages() {
@@ -203,9 +203,9 @@ class VideoModePolicyTest {
         val admitted = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(device), selectedWledIdentities = setOf(device.identity), renderMode = RenderMode.AUDIO)
         LiveRendererSettings.begin(admitted)
         try {
-            assertFalse(LiveRendererSettings.setRenderMode(RenderMode.VIDEO))
-            assertFalse(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
-            assertEquals(RenderMode.AUDIO, LiveRendererSettings.apply(admitted).renderMode)
+            assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO))
+            assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO_AUDIO))
+            assertEquals(RenderMode.VIDEO_AUDIO, LiveRendererSettings.apply(admitted).renderMode)
         } finally { LiveRendererSettings.end() }
     }
 
@@ -217,7 +217,7 @@ class VideoModePolicyTest {
         listOf(hyperionAdmitted, videoWled).forEach { admitted ->
             LiveRendererSettings.begin(admitted)
             try {
-                assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
+                assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO_AUDIO))
                 assertEquals(admitted.outputMode, LiveRendererSettings.apply(admitted).outputMode)
                 assertEquals(RenderMode.VIDEO_AUDIO, LiveRendererSettings.apply(admitted).renderMode)
             } finally { LiveRendererSettings.end() }

@@ -19,7 +19,7 @@ internal object WledRouteBindings {
         val selectedById = selected.associateBy { it.identity }
         if (selectedById.size != selected.size || fresh.map { it.identity }.toSet() != selectedById.keys || fresh.any { it.identity !in selectedById || !it.valid() }) return null
         if (fresh.any { candidate -> candidate != selectedById[candidate.identity] }) return null
-        if (settings.requiresVideo() && fresh.any { !WledCalibrationPolicy.routeable(settings, it) }) return null
+        if (fresh.any { settings.calibrationFor(it)?.validFor(it) != true }) return null
         val id = (++nextId).toString()
         bindings[id] = Binding(settings, fresh)
         return id
@@ -33,9 +33,11 @@ internal object WledRouteBindings {
 
 /** Read-only, bounded preflight seam. It never creates a UDP socket or output object. */
 internal object WledCapturePreflight {
+    /** A session is admitted only when it can later render every source shape. */
+    fun transitionCapable(settings: AudioSettings): Boolean = settings.outputMode == OutputMode.WLED &&
+        settings.selectedWledDevices().let { selected -> selected.isNotEmpty() && selected.all { settings.calibrationFor(it)?.validFor(it) == true } }
     /** Video is all-or-nothing: every selected WLED target needs valid matching calibration. */
-    fun eligible(settings: AudioSettings): Boolean = settings.outputMode == OutputMode.WLED &&
-        settings.selectedWledDevices().let { selected -> selected.isNotEmpty() && (!settings.requiresVideo() || selected.all { WledCalibrationPolicy.routeable(settings, it) }) }
+    fun eligible(settings: AudioSettings): Boolean = transitionCapable(settings)
     fun bind(settings: AudioSettings, revalidate: (Collection<WledDevice>) -> List<WledDevice> = WledDiscovery::revalidate): String? {
         if (!eligible(settings)) return null
         return WledRouteBindings.bind(settings, revalidate(settings.selectedWledDevices()))
@@ -181,7 +183,7 @@ internal class OutputRouter private constructor(private val mode: OutputMode, pr
                     ?.takeIf { it.isNotEmpty() && it.all(WledDevice::valid) }
                     ?: throw IllegalStateException("Missing fresh WLED route binding")
                 val input = settings.liveCaptureFrame()
-                OutputRouter(OutputMode.WLED, null, fresh.map { device -> WledRealtimeOutput(device, settings.wledSourceZones, if (settings.requiresVideo()) settings.calibrationFor(device) else null, input) }.toTypedArray(), WledSourceFrame(input, settings.wledSourceZones))
+                OutputRouter(OutputMode.WLED, null, fresh.map { device -> WledRealtimeOutput(device, settings.wledSourceZones, settings.calibrationFor(device), input) }.toTypedArray(), WledSourceFrame(input, settings.wledSourceZones))
             }
         }
         internal fun forTest(mode: OutputMode, hyperion: HyperionOutput? = null, wled: Array<WledOutput> = emptyArray(), wledSource: WledSourceFrame? = null) = OutputRouter(mode, hyperion, wled, wledSource)

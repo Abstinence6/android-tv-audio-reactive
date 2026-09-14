@@ -130,9 +130,9 @@ object LiveRendererSettings {
     @Synchronized fun setBrightness(value: Float) { if (active && value in 0f..1f) { brightness = value; videoAudioSilenceBrightnessFloor = videoAudioSilenceBrightnessFloor?.coerceAtMost(value) } }
     @Synchronized fun setSensitivity(value: Float) { if (active && value in .25f..3.25f) sensitivity = value }
     @Synchronized fun setVideoSaturationPercent(value: Int) { if (active && VideoSaturationPolicy.valid(value)) videoSaturationPercent = value }
-    /** Never changes a router or capture resource: only an already video-capable admitted route can render video live. */
-    @Synchronized fun setRenderMode(value: RenderMode): Boolean {
-        if (!active || !LiveRenderModeTransitionPolicy.permits(admitted, value)) return false
+    /** Service-only commit after the lifecycle gate has acquired/released every required source. */
+    @Synchronized internal fun commitRenderMode(value: RenderMode): Boolean {
+        if (!active) return false
         renderMode = value
         return true
     }
@@ -166,11 +166,10 @@ object LiveRendererSettings {
     }
 }
 
-/** WLED mappers are fixed at preflight. AUDIO admission has no mapper and must stop/restart before video. */
+/** Route capability is determined once at local admission and is independent of its initial mode. */
 object LiveRenderModeTransitionPolicy {
     fun permits(admitted: AudioSettings?, requested: RenderMode): Boolean = admitted != null &&
-        (requested == RenderMode.AUDIO || requested == RenderMode.ANIMATION || admitted.outputMode == OutputMode.HYPERION ||
-            (admitted.requiresVideo() && admitted.selectedWledDevices().all { WledCalibrationPolicy.routeable(admitted, it) }))
+        (admitted.outputMode == OutputMode.HYPERION || admitted.selectedWledDevices().all { admitted.calibrationFor(it)?.validFor(it) == true })
 }
 
 object LiveRenderModeUiPolicy {

@@ -199,10 +199,50 @@ object CaptureModeCheckboxPolicy {
     }
 }
 object EffectSelectionPolicy { fun enabledWhileCaptureActive() = true }
-/** Crossing the no-input boundary requires a fresh service admission; live mode changes cannot create capture inputs. */
+/** Source ownership is explicit; a mode cannot be committed until its complete resource set exists. */
+data class RenderRequirements(val audio: Boolean, val video: Boolean) {
+    companion object {
+        fun forMode(mode: RenderMode) = when (mode) {
+            RenderMode.ANIMATION -> RenderRequirements(false, false)
+            RenderMode.AUDIO -> RenderRequirements(true, false)
+            RenderMode.VIDEO -> RenderRequirements(false, true)
+            RenderMode.VIDEO_AUDIO -> RenderRequirements(true, true)
+        }
+    }
+}
+
+data class LocalTransitionRequest(val epoch: Long, val nonce: String, val target: RenderMode, val hasProjectionResult: Boolean)
+sealed interface TransitionDecision {
+    data class Accept(val requirements: RenderRequirements) : TransitionDecision
+    data object Reject : TransitionDecision
+}
+
+/** Pure exactly-once local capability gate; no remote path can mint a capability. */
+class LocalTransitionPolicy(private var active: RenderMode) {
+    private var epoch = 0L
+    private var nonce: String? = null
+    fun mint(nextEpoch: Long, capability: String) { epoch = nextEpoch - 1; nonce = capability }
+    fun decide(request: LocalTransitionRequest): TransitionDecision {
+        val crossingIntoInput = active == RenderMode.ANIMATION && request.target != RenderMode.ANIMATION
+        if (request.epoch != epoch + 1 || request.nonce != nonce || (crossingIntoInput != request.hasProjectionResult)) return TransitionDecision.Reject
+        nonce = null
+        epoch = request.epoch
+        return TransitionDecision.Accept(RenderRequirements.forMode(request.target))
+    }
+    fun commit(target: RenderMode) { active = target }
+    fun current() = active
+    fun epoch() = epoch
+}
+
+/** Process-local capabilities are minted by visible MainActivity actions and consumed once by the service. */
+object LocalTransitionCapabilities {
+    private val pending = mutableMapOf<String, Long>()
+    @Synchronized fun mint(epoch: Long): String = java.util.UUID.randomUUID().toString().also { pending[it] = epoch }
+    @Synchronized fun consume(epoch: Long, nonce: String): Boolean = pending.remove(nonce) == epoch
+}
+
 object AnimationModeTransitionPolicy {
-    fun requiresRestart(serviceActive: Boolean, current: RenderMode, requested: RenderMode): Boolean =
-        serviceActive && (current == RenderMode.ANIMATION) != (requested == RenderMode.ANIMATION)
+    fun requiresRestart(serviceActive: Boolean, current: RenderMode, requested: RenderMode): Boolean = false
 }
 /** Local UI-only diagnostic state. It deliberately has no capture, route, discovery, or socket API. */
 object RainbowVisualSourcePolicy {

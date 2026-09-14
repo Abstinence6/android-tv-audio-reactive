@@ -18,20 +18,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** One user-approved projection owns only the sources required by the selected mode. */
 class AudioReactiveService : Service() {
  companion object {
-  const val EXTRA_RESULT_CODE="resultCode"; const val EXTRA_RESULT_DATA="resultData"; const val EXTRA_NO_INPUT_ANIMATION="noInputAnimation"; const val EXTRA_WLED_ROUTE_BINDING="wledRouteBinding"; const val EXTRA_HYPERION_ROUTE_BINDING="hyperionRouteBinding"; const val EXTRA_ADMISSION_GENERATION="admissionGeneration"; const val EXTRA_ADMISSION_FAILED="admissionFailed"; const val ACTION_CAPTURE_STATE_CHANGED="org.hyperion.audioreactive.CAPTURE_STATE_CHANGED"; private const val CHANNEL="capture"; private const val ID=7
+  const val EXTRA_RESULT_CODE="resultCode"; const val EXTRA_RESULT_DATA="resultData"; const val EXTRA_NO_INPUT_ANIMATION="noInputAnimation"; const val EXTRA_WLED_ROUTE_BINDING="wledRouteBinding"; const val EXTRA_HYPERION_ROUTE_BINDING="hyperionRouteBinding"; const val EXTRA_ADMISSION_GENERATION="admissionGeneration"; const val EXTRA_ADMISSION_FAILED="admissionFailed"; const val EXTRA_TRANSITION_EPOCH="transitionEpoch"; const val EXTRA_CAPABILITY_NONCE="transitionCapabilityNonce"; const val EXTRA_TARGET_RENDER="transitionTargetRender"; const val ACTION_LOCAL_TRANSITION="org.hyperion.audioreactive.LOCAL_TRANSITION"; const val ACTION_CAPTURE_STATE_CHANGED="org.hyperion.audioreactive.CAPTURE_STATE_CHANGED"; private const val CHANNEL="capture"; private const val ID=7
   internal const val STARTUP_FAILURE_DIAGNOSTIC="startup failed; local cleanup completed"
   internal const val CLEANUP_FAILURE_DIAGNOSTIC="capture stopped; local cleanup incomplete"
   private const val TAG="AudioReactiveService"
   @Volatile private var alive=false; @Volatile private var status=CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT
   fun exists()=alive; fun captureStatus()=status; fun stopExisting(context:android.content.Context){if(alive)context.stopService(Intent(context,AudioReactiveService::class.java))}
  }
- private val running=AtomicBoolean(); private val worker=Executors.newSingleThreadExecutor(); private var projection:MediaProjection?=null; private var recorder:AudioRecord?=null; private var reader:ImageReader?=null; private var display:android.hardware.display.VirtualDisplay?=null; private var router:OutputRouter?=null; private var invalidAdmissionGeneration:Long?=null; private var selectedVoiceInputDeviceId:Int?=null
+ private val running=AtomicBoolean(); private val worker=Executors.newSingleThreadExecutor(); private var projection:MediaProjection?=null; private var recorder:AudioRecord?=null; private var reader:ImageReader?=null; private var display:android.hardware.display.VirtualDisplay?=null; private var router:OutputRouter?=null; private var admittedSettings:AudioSettings?=null; private var transitions:LocalTransitionPolicy?=null; private var invalidAdmissionGeneration:Long?=null; private var selectedVoiceInputDeviceId:Int?=null
  private val voiceInputDeviceCallback=object:AudioDeviceCallback(){override fun onAudioDevicesRemoved(removed:Array<out AudioDeviceInfo>){if(VoiceInputRoutePolicy.selectedDeviceWasRemoved(selectedVoiceInputDeviceId,removed.map{it.id}))terminateVoiceInputLost()}}
  private val voiceInputRouteListener=AudioRouting.OnRoutingChangedListener{routing->if(VoiceInputRoutePolicy.routedAwayFromSelectedDevice(selectedVoiceInputDeviceId,(routing as? AudioRecord)?.routedDevice?.id))terminateVoiceInputLost()}
  private val admission = ServiceRouteAdmission(::discardRouteBindings)
  private val lifecycle = CaptureServiceLifecycle(::performTeardown)
  override fun onBind(intent:Intent?):IBinder?=null
  override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
+  if(intent?.action==ACTION_LOCAL_TRANSITION) { worker.execute { transition(intent) }; return START_NOT_STICKY }
   val generation=intent?.getLongExtra(EXTRA_ADMISSION_GENERATION,Long.MIN_VALUE)?:Long.MIN_VALUE
   val ids=RouteBindingIds(intent?.getStringExtra(EXTRA_WLED_ROUTE_BINDING),intent?.getStringExtra(EXTRA_HYPERION_ROUTE_BINDING))
   // The lifecycle gate linearizes route admission against onStop/onDestroy cancellation.
@@ -69,7 +70,7 @@ class AudioReactiveService : Service() {
    if(s.requiresVideo()&&!createVideoWhileStarting(p)) return
    if(!lifecycle.acquire(acquire={ admission.consume { ids -> OutputRouter.create(s,ids.wled,ids.hyperion) } },release={it.stop()},assign={router=it})) return
    if(!lifecycle.activate {
-    alive=true; LiveRendererSettings.begin(s); broadcast(generation); running.set(true); router!!.start()
+    alive=true; admittedSettings=s; transitions=LocalTransitionPolicy(s.renderMode); LiveRendererSettings.begin(s); broadcast(generation); running.set(true); router!!.start()
     status=when(s.renderMode){RenderMode.AUDIO->CaptureStatus.CAPTURE_ACTIVE_AUDIO;RenderMode.VIDEO->CaptureStatus.CAPTURE_ACTIVE_VIDEO;RenderMode.VIDEO_AUDIO->CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO;RenderMode.ANIMATION->CaptureStatus.CAPTURE_ACTIVE_ANIMATION}
     LocalStatusStore.update(LocalCaptureStatus(status, if(s.outputMode==OutputMode.WLED)s.selectedWledDevices().map{it.name}else listOf("Hyperion"),s.selectedWledDevices().filter{s.calibrationFor(it)?.validFor(it)==true}.map{it.name},s.selectedWledDevices().filterNot{WledCalibrationPolicy.routeable(s,it)}.map{it.name}))
     broadcast()
@@ -84,8 +85,8 @@ class AudioReactiveService : Service() {
   try {
    if(!lifecycle.whileStarting { status=CaptureStatus.PREPARING_ANIMATION; LocalStatusStore.reset(status); broadcast() }) return
    if(!lifecycle.acquire(acquire={ admission.consume { ids -> OutputRouter.create(s,ids.wled,ids.hyperion) } },release={it.stop()},assign={router=it})) return
-   if(!lifecycle.activate { alive=true; LiveRendererSettings.begin(s); broadcast(generation); running.set(true); router!!.start(); status=CaptureStatus.CAPTURE_ACTIVE_ANIMATION; LocalStatusStore.reset(status); broadcast() }) return
-   animationLoop(s)
+   if(!lifecycle.activate { alive=true; admittedSettings=s; transitions=LocalTransitionPolicy(s.renderMode); LiveRendererSettings.begin(s); broadcast(generation); running.set(true); router!!.start(); status=CaptureStatus.CAPTURE_ACTIVE_ANIMATION; LocalStatusStore.reset(status); broadcast() }) return
+   videoLoop(s)
   } catch(failure:Exception) { Log.w(TAG, "$STARTUP_FAILURE_DIAGNOSTIC (${failure.javaClass.simpleName})"); status=CaptureStatus.ROUTER_INIT_FAILED; LocalStatusStore.reset(status); broadcastAdmissionFailed(generation); broadcast(); stop() }
  }
  private fun createAudio(p:MediaProjection,s:AudioSettings):AudioRecord { if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)error("audio permission"); val min=AudioRecord.getMinBufferSize(48000,AudioFormat.CHANNEL_IN_STEREO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(8192); val builder=AudioRecord.Builder().setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(48000).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build()).setBufferSizeInBytes(min); if(s.audioInput==AudioInput.MICROPHONE){val microphone=VoiceInputDevices.connected(this)?:error("microphone disconnected"); selectedVoiceInputDeviceId=microphone.id; val record=builder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION).build(); if(!record.setPreferredDevice(microphone)){record.release();selectedVoiceInputDeviceId=null;error("microphone route unavailable")}; record.addOnRoutingChangedListener(voiceInputRouteListener,null); (getSystemService(AUDIO_SERVICE)as AudioManager).registerAudioDeviceCallback(voiceInputDeviceCallback,null); record.startRecording(); return record}; return builder.setAudioPlaybackCaptureConfig(AudioPlaybackCaptureConfiguration.Builder(p).addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME).build()).build().also{it.startRecording()} }
@@ -99,7 +100,40 @@ class AudioReactiveService : Service() {
   if(display==null) display=p.createVirtualDisplay("audio-reactive-video",320,180,1,DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,requireNotNull(reader).surface,null,null)
   return true
  }
- /** The active projection is retained while sources are reconciled; switching mode never revives a consumed consent token. */
+ /** All source changes are local-capability-gated and serialized with stop/revocation. */
+ private fun transition(intent:Intent) {
+  val target=runCatching { RenderMode.valueOf(intent.getStringExtra(EXTRA_TARGET_RENDER) ?: "") }.getOrNull() ?: return
+  val epoch=intent.getLongExtra(EXTRA_TRANSITION_EPOCH,Long.MIN_VALUE)
+  val nonce=intent.getStringExtra(EXTRA_CAPABILITY_NONCE) ?: return
+  val data=intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+  val result=intent.getIntExtra(EXTRA_RESULT_CODE,0)==Activity.RESULT_OK && data!=null
+  lifecycle.whileActive {
+   val gate=transitions ?: return@whileActive
+   if(!LocalTransitionCapabilities.consume(epoch,nonce)) return@whileActive
+   gate.mint(epoch,nonce)
+   if(gate.decide(LocalTransitionRequest(epoch,nonce,target,result)) !is TransitionDecision.Accept) return@whileActive
+   try {
+    val needs=RenderRequirements.forMode(target)
+    var p=projection
+    if(needs.video || needs.audio) {
+     if(p==null) { p=(getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(Activity.RESULT_OK,requireNotNull(data))?:error("projection"); projection=p; p!!.registerCallback(object:MediaProjection.Callback(){override fun onStop(){stop()}},null) }
+     if(needs.audio && recorder==null) recorder=createAudio(p!!,requireNotNull(admittedSettings))
+     if(needs.video && reader==null && !createVideo(p!!)) error("video source unavailable")
+    }
+    if(!needs.audio) releaseAudio()
+    if(!needs.video) { releaseVideo(); projection?.stop(); projection=null }
+    setForegroundTypesFor(needs)
+    gate.commit(target)
+    LiveRendererSettings.commitRenderMode(target)
+    status=when(target){RenderMode.AUDIO->CaptureStatus.CAPTURE_ACTIVE_AUDIO;RenderMode.VIDEO->CaptureStatus.CAPTURE_ACTIVE_VIDEO;RenderMode.VIDEO_AUDIO->CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO;RenderMode.ANIMATION->CaptureStatus.CAPTURE_ACTIVE_ANIMATION}
+    LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status)); broadcast()
+   } catch(_:Exception) { lifecycle.stop { status=CaptureStatus.ROUTER_INIT_FAILED; router?.stop() } }
+  }
+ }
+ private fun setForegroundTypesFor(needs:RenderRequirements) {
+  val types=if(!needs.audio && !needs.video) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if(needs.audio && admittedSettings?.audioInput==AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+  startForeground(ID,notification(!needs.audio&&!needs.video),types)
+ }
  private fun reconcileSources(p:MediaProjection,s:AudioSettings):Boolean = lifecycle.whileActive {
   if(s.requiresAudio()&&recorder==null) {
    if(s.audioInput==AudioInput.MICROPHONE) startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)

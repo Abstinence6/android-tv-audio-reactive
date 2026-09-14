@@ -5,7 +5,7 @@ import org.junit.Test
 
 class WledCapturePreflightTest {
     private val selected = WledDevice("mac:AABBCCDDEEFF", "Desk", "192.168.1.152", 30, 21324)
-    private val settings = AudioSettings(Effect.FIRE, .5f, 1f, 20, OutputMode.WLED, listOf(selected), setOf(selected.identity))
+    private val settings = AudioSettings(Effect.FIRE, .5f, 1f, 20, OutputMode.WLED, listOf(selected), setOf(selected.identity), wledCalibrations = listOf(WledScreenCalibration.proportional(selected.identity, selected.leds)))
 
     @Test fun emptyOrChangedFreshSetCannotCreateABinding() {
         assertNull(WledCapturePreflight.bind(settings) { emptyList() })

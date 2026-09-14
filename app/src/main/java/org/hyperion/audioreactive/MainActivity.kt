@@ -154,6 +154,8 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
     private var pendingProjectionGeneration: Long? = null
     private var pendingAdmissionGeneration: Long? = null
     private var captureAdmissionLocked = false
+    private var localTransitionEpoch = 0L
+    private var pendingLocalTransition: RenderMode? = null
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val generation = intent.getLongExtra(AudioReactiveService.EXTRA_ADMISSION_GENERATION, Long.MIN_VALUE)
@@ -494,24 +496,22 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val persisted = RuntimeSettings.snapshot()
         val previous = effectiveRenderSettings().renderMode
         val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, animationBox.isChecked, previous)
-        // ANIMATION owns neither projection nor AudioRecord. Crossing that boundary must stop the
-        // current service so the next capture press performs fresh permission and resource admission.
-        val restartForInputOwnership = AnimationModeTransitionPolicy.requiresRestart(AudioReactiveService.exists(), previous, result.mode)
-        if (restartForInputOwnership) AudioReactiveService.stopExisting(this)
-        val accepted = restartForInputOwnership || !AudioReactiveService.exists() || LiveRendererSettings.setRenderMode(result.mode)
-        val visible = LiveRenderModeUiPolicy.checkboxes(
-            if (accepted) {
-                if (AudioReactiveService.exists() && !restartForInputOwnership) effectiveRenderSettings().renderMode else result.mode
-            } else previous
-        )
+        if (AudioReactiveService.exists() && !result.rejected) {
+            if (previous == RenderMode.ANIMATION && result.mode != RenderMode.ANIMATION) {
+                // Only this visible UI path may obtain a fresh projection result.
+                pendingLocalTransition = result.mode
+                if (RenderRequirements.forMode(result.mode).audio && !hasRecordAudioPermission()) {
+                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                } else requestLocalProjection()
+            } else dispatchLocalTransition(result.mode, null)
+        } else if (!AudioReactiveService.exists() && !result.rejected) RuntimeSettings.update { it.copy(renderMode = result.mode) }
+        val visible = LiveRenderModeUiPolicy.checkboxes(if (result.rejected) previous else result.mode)
         suppressModeCallbacks = true
         audioBox.isChecked = visible.audioChecked
         videoBox.isChecked = visible.videoChecked
         animationBox.isChecked = visible.animationChecked
         suppressModeCallbacks = false
-        if (restartForInputOwnership || !AudioReactiveService.exists()) RuntimeSettings.update { it.copy(renderMode = result.mode) }
-        if (!accepted) status.text = getString(R.string.video_change_rejected)
-        else if (result.rejected) status.text = getString(R.string.no_mode_selected)
+        if (result.rejected) status.text = getString(R.string.no_mode_selected)
         rebuildEffectSelector()
         refreshConditionalControls()
         MqttControlService.notifyDiagnosticChanged()
@@ -718,6 +718,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         zonesRow.visibility = if (TvUiStatePolicy.showWledZones(settings.outputMode)) View.VISIBLE else View.GONE
     }
 
+
+    private fun requestLocalProjection() {
+        if (pendingLocalTransition != null) startActivityForResult((getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent(), captureRequest)
+    }
+    private fun dispatchLocalTransition(target: RenderMode, projection: Intent?) {
+        val epoch = ++localTransitionEpoch
+        val nonce = LocalTransitionCapabilities.mint(epoch)
+        ContextCompat.startForegroundService(this, Intent(this, AudioReactiveService::class.java).setAction(AudioReactiveService.ACTION_LOCAL_TRANSITION)
+            .putExtra(AudioReactiveService.EXTRA_TRANSITION_EPOCH, epoch)
+            .putExtra(AudioReactiveService.EXTRA_CAPABILITY_NONCE, nonce)
+            .putExtra(AudioReactiveService.EXTRA_TARGET_RENDER, target.name)
+            .also { if (projection != null) it.putExtra(AudioReactiveService.EXTRA_RESULT_CODE, Activity.RESULT_OK).putExtra(AudioReactiveService.EXTRA_RESULT_DATA, projection) })
+    }
 
     private fun effectiveRenderSettings(): AudioSettings =
         EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), AudioReactiveService.exists())
@@ -987,17 +1000,29 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
 
     override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, grants: IntArray) {
         super.onRequestPermissionsResult(code, permissions, grants)
-        if (code == 1) pendingPermissionGeneration?.let { generation ->
-            pendingPermissionGeneration = null
-            captureToggleCoordinator.onRecordAudioPermissionResult(generation, grants.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        if (code == 1) {
+            val local = pendingLocalTransition
+            if (local != null) {
+                if (grants.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestLocalProjection() else pendingLocalTransition = null
+            } else pendingPermissionGeneration?.let { generation ->
+                pendingPermissionGeneration = null
+                captureToggleCoordinator.onRecordAudioPermissionResult(generation, grants.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+            }
         }
     }
     @Deprecated("API callback")
     override fun onActivityResult(code: Int, result: Int, data: Intent?) {
         super.onActivityResult(code, result, data)
-        if (code == captureRequest) pendingProjectionGeneration?.let { generation ->
-            pendingProjectionGeneration = null
-            captureToggleCoordinator.onMediaProjectionConsentResult(generation, result, data)
+        if (code == captureRequest) {
+            pendingLocalTransition?.let { target ->
+                pendingLocalTransition = null
+                if (result == Activity.RESULT_OK && data != null) dispatchLocalTransition(target, data)
+                return
+            }
+            pendingProjectionGeneration?.let { generation ->
+                pendingProjectionGeneration = null
+                captureToggleCoordinator.onMediaProjectionConsentResult(generation, result, data)
+            }
         }
     }
 }

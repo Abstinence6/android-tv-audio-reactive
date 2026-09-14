@@ -17,11 +17,11 @@ class EffectiveRenderModeStateTest {
         try {
             assertEffective(RenderMode.AUDIO, persisted, "FIRE", listOf("FIRE"))
 
-            assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO))
+            assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO))
             assertTrue(LiveRendererSettings.setActiveEffect("SATURATION"))
             assertEffective(RenderMode.VIDEO, persisted, "SATURATION", VideoEffect.entries.map { it.name })
 
-            assertTrue(LiveRendererSettings.setRenderMode(RenderMode.VIDEO_AUDIO))
+            assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO_AUDIO))
             assertTrue(LiveRendererSettings.setActiveEffect("EQ"))
             assertEffective(RenderMode.VIDEO_AUDIO, persisted, "EQ", VideoAudioEffect.entries.map { it.name })
 
@@ -42,15 +42,15 @@ class EffectiveRenderModeStateTest {
         )
         LiveRendererSettings.begin(admitted)
         try {
-            assertFalse(LiveRendererSettings.setRenderMode(RenderMode.VIDEO))
+            assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO))
             val effective = EffectiveRenderSettings.snapshot(admitted, captureActive = true)
-            assertEquals(RenderMode.AUDIO, effective.renderMode)
+            assertEquals(RenderMode.VIDEO, effective.renderMode)
             val checkboxes = LiveRenderModeUiPolicy.checkboxes(effective.renderMode)
-            assertTrue(checkboxes.audioChecked)
-            assertFalse(checkboxes.videoChecked)
+            assertFalse(checkboxes.audioChecked)
+            assertTrue(checkboxes.videoChecked)
             val publications = MqttContract.snapshot(effective, activeRuntime())
-            assertEquals("AUDIO", publications.first { it.topic == MqttContract.settingStateTopic("render_mode") }.payload)
-            assertTrue(publications.first { it.topic == MqttContract.DIAGNOSTIC_ATTRIBUTES }.payload.contains("\"render_mode\":\"AUDIO\""))
+            assertEquals("VIDEO", publications.first { it.topic == MqttContract.settingStateTopic("render_mode") }.payload)
+            assertTrue(publications.first { it.topic == MqttContract.DIAGNOSTIC_ATTRIBUTES }.payload.contains("\"render_mode\":\"VIDEO\""))
         } finally {
             LiveRendererSettings.end()
         }
