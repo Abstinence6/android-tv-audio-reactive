@@ -211,6 +211,11 @@ data class RenderRequirements(val audio: Boolean, val video: Boolean) {
     }
 }
 
+/** The no-input renderer owns no MediaProjection; capture modes do. */
+object LiveRenderLoopPolicy {
+    fun requiresProjection(mode: RenderMode): Boolean = mode != RenderMode.ANIMATION
+}
+
 data class LocalTransitionRequest(val epoch: Long, val nonce: String, val target: RenderMode, val hasProjectionResult: Boolean)
 sealed interface TransitionDecision {
     data class Accept(val requirements: RenderRequirements) : TransitionDecision

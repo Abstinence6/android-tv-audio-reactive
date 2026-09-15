@@ -56,4 +56,12 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("frozen.requiresAudio()&&frozen.audioInput == AudioInput.MICROPHONE"))
         assertTrue(source.contains("startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)}"))
     }
+
+    @Test fun animationBranchSendsBeforeAnyProjectionLookup() {
+        val branch = source.indexOf("if(!LiveRenderLoopPolicy.requiresProjection(s.renderMode))")
+        val projectionLookup = source.indexOf("val p=projection?:break", branch)
+        assertTrue(branch >= 0 && projectionLookup > branch)
+        assertTrue(source.substring(branch, projectionLookup).contains("animationRenderer.render"))
+        assertTrue(source.substring(branch, projectionLookup).contains("sendFrame(smoother.apply(raw),null"))
+    }
 }
