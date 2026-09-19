@@ -61,17 +61,18 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("if(s.audioInput==AudioInput.MICROPHONE) { foregroundTypesRequested=ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE; startForeground(ID,notification(),foregroundTypesRequested) }"))
     }
 
-    @Test fun everyServiceTerminalPathCapturesAnExplicitBoundedCauseBeforeLifecycleStop() {
+    @Test fun everyServiceTerminalPathUsesTheSharedTerminalStopWiring() {
         assertTrue(source.contains("terminalStop(TerminalCause.TRANSITION_EXCEPTION)"))
         assertTrue(source.contains("terminalStop(TerminalCause.UNEXPECTED_PROJECTION_REVOKE)"))
         assertTrue(source.contains("terminalStop(TerminalCause.ROUTE_LOST)"))
         assertTrue(source.contains("terminalStop(TerminalCause.MICROPHONE_LOSS)"))
         assertTrue(source.contains("terminalStop(TerminalCause.EXPLICIT_STOP)"))
-        assertTrue(source.contains("override fun onDestroy(){terminalStop(TerminalCause.DESTROY)"))
+        assertTrue(source.contains("AudioReactiveServiceCommandDispatch.dispatch(intent?.action,::terminalStop)"))
+        assertTrue(source.contains("override fun onDestroy(){AudioReactiveServiceCommandDispatch.onDestroy { terminalStop(it) }"))
         val terminalStop = source.indexOf("private fun terminalStop(cause:TerminalCause")
-        val capture = source.indexOf("TerminalDiagnostics.capture(cause,requestedRender,committedRender,transitionEpoch", terminalStop)
-        val lifecycleStop = source.indexOf("lifecycle.stop", terminalStop)
-        assertTrue(terminalStop >= 0 && capture > terminalStop && lifecycleStop > terminalStop)
+        val lifecycleStop = source.indexOf("terminalStops.stop(cause,beforeCleanup)", terminalStop)
+        assertTrue(source.contains("CaptureTerminalStop(lifecycle)"))
+        assertTrue(terminalStop >= 0 && lifecycleStop > terminalStop)
     }
 
     @Test fun animationBranchSendsBeforeAnyProjectionLookup() {

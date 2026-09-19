@@ -18,21 +18,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** One user-approved projection owns only the sources required by the selected mode. */
 class AudioReactiveService : Service() {
  companion object {
-  const val EXTRA_RESULT_CODE="resultCode"; const val EXTRA_RESULT_DATA="resultData"; const val EXTRA_NO_INPUT_ANIMATION="noInputAnimation"; const val EXTRA_WLED_ROUTE_BINDING="wledRouteBinding"; const val EXTRA_HYPERION_ROUTE_BINDING="hyperionRouteBinding"; const val EXTRA_ADMISSION_GENERATION="admissionGeneration"; const val EXTRA_ADMISSION_FAILED="admissionFailed"; const val EXTRA_TRANSITION_EPOCH="transitionEpoch"; const val EXTRA_CAPABILITY_NONCE="transitionCapabilityNonce"; const val EXTRA_TARGET_RENDER="transitionTargetRender"; const val ACTION_LOCAL_TRANSITION="org.hyperion.audioreactive.LOCAL_TRANSITION"; const val ACTION_CAPTURE_STATE_CHANGED="org.hyperion.audioreactive.CAPTURE_STATE_CHANGED"; private const val CHANNEL="capture"; private const val ID=7
+  const val EXTRA_RESULT_CODE="resultCode"; const val EXTRA_RESULT_DATA="resultData"; const val EXTRA_NO_INPUT_ANIMATION="noInputAnimation"; const val EXTRA_WLED_ROUTE_BINDING="wledRouteBinding"; const val EXTRA_HYPERION_ROUTE_BINDING="hyperionRouteBinding"; const val EXTRA_ADMISSION_GENERATION="admissionGeneration"; const val EXTRA_ADMISSION_FAILED="admissionFailed"; const val EXTRA_TRANSITION_EPOCH="transitionEpoch"; const val EXTRA_CAPABILITY_NONCE="transitionCapabilityNonce"; const val EXTRA_TARGET_RENDER="transitionTargetRender"; const val ACTION_LOCAL_TRANSITION="org.hyperion.audioreactive.LOCAL_TRANSITION"; const val ACTION_EXPLICIT_STOP="org.hyperion.audioreactive.EXPLICIT_STOP"; const val ACTION_CAPTURE_STATE_CHANGED="org.hyperion.audioreactive.CAPTURE_STATE_CHANGED"; private const val CHANNEL="capture"; private const val ID=7
   internal const val STARTUP_FAILURE_DIAGNOSTIC="startup failed; local cleanup completed"
   internal const val CLEANUP_FAILURE_DIAGNOSTIC="capture stopped; local cleanup incomplete"
   private const val TAG="AudioReactiveService"
   @Volatile private var alive=false; @Volatile private var status=CaptureStatus.NEEDS_MEDIA_PROJECTION_CONSENT
-  fun exists()=alive; fun captureStatus()=status; fun stopExisting(context:android.content.Context){if(alive)context.stopService(Intent(context,AudioReactiveService::class.java))}
+  fun exists()=alive; fun captureStatus()=status; fun stopExisting(context:android.content.Context){if(alive)context.startService(Intent(context,AudioReactiveService::class.java).setAction(ACTION_EXPLICIT_STOP))}
  }
  private val running=AtomicBoolean(); private val worker=Executors.newSingleThreadExecutor(); private var projection:MediaProjection?=null; private var recorder:AudioRecord?=null; private var reader:ImageReader?=null; private var display:android.hardware.display.VirtualDisplay?=null; private var router:OutputRouter?=null; private var admittedSettings:AudioSettings?=null; private var transitions:LocalTransitionPolicy?=null; private var invalidAdmissionGeneration:Long?=null; private var selectedVoiceInputDeviceId:Int?=null; private var requestedRender:RenderMode?=null; private var committedRender:RenderMode?=null; private var transitionEpoch:Long?=null; private var foregroundTypesRequested=0
  private val voiceInputDeviceCallback=object:AudioDeviceCallback(){override fun onAudioDevicesRemoved(removed:Array<out AudioDeviceInfo>){if(VoiceInputRoutePolicy.selectedDeviceWasRemoved(selectedVoiceInputDeviceId,removed.map{it.id}))terminateVoiceInputLost()}}
  private val voiceInputRouteListener=AudioRouting.OnRoutingChangedListener{routing->if(VoiceInputRoutePolicy.routedAwayFromSelectedDevice(selectedVoiceInputDeviceId,(routing as? AudioRecord)?.routedDevice?.id))terminateVoiceInputLost()}
  private val admission = ServiceRouteAdmission(::discardRouteBindings)
  private val lifecycle = CaptureServiceLifecycle(::performTeardown)
+ private val terminalStops = CaptureTerminalStop(lifecycle) { cause -> TerminalDiagnostics.capture(cause,requestedRender,committedRender,transitionEpoch,TransitionDiagnostics.OwnedState(projection!=null,recorder!=null,reader!=null,foregroundTypesRequested.toString()),foregroundTypesRequested) }
  override fun onBind(intent:Intent?):IBinder?=null
  override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
-  if(intent?.action==ACTION_LOCAL_TRANSITION) { worker.execute { transition(intent) }; return START_NOT_STICKY }
+  when(AudioReactiveServiceCommandDispatch.dispatch(intent?.action,::terminalStop) { worker.execute { intent?.let(::transition) } }) {
+   AudioReactiveServiceCommandDispatch.Result.TERMINAL_STOP,AudioReactiveServiceCommandDispatch.Result.LOCAL_TRANSITION -> return START_NOT_STICKY
+   AudioReactiveServiceCommandDispatch.Result.NORMAL_START -> Unit
+  }
   val generation=intent?.getLongExtra(EXTRA_ADMISSION_GENERATION,Long.MIN_VALUE)?:Long.MIN_VALUE
   val ids=RouteBindingIds(intent?.getStringExtra(EXTRA_WLED_ROUTE_BINDING),intent?.getStringExtra(EXTRA_HYPERION_ROUTE_BINDING))
   // The lifecycle gate linearizes route admission against onStop/onDestroy cancellation.
@@ -208,7 +212,7 @@ class AudioReactiveService : Service() {
  private fun terminateRouteLost(){ terminalStop(TerminalCause.ROUTE_LOST) { status=CaptureStatus.ROUTE_LOST; LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status,lastSendSucceeded=false)) } }
  private fun terminateVoiceInputLost(){ terminalStop(TerminalCause.MICROPHONE_LOSS) { status=CaptureStatus.MICROPHONE_ROUTE_LOST; LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status,lastSendSucceeded=false)) } }
  private fun sleep(start:Long,fps:Int){val n=CaptureCadence.remainingSleepNanos(start,System.nanoTime(),fps);if(n>0)Thread.sleep(n/1_000_000L,(n%1_000_000L).toInt())}
- private fun terminalStop(cause:TerminalCause,beforeCleanup:()->Unit={}) { lifecycle.stop { TerminalDiagnostics.capture(cause,requestedRender,committedRender,transitionEpoch,TransitionDiagnostics.OwnedState(projection!=null,recorder!=null,reader!=null,foregroundTypesRequested.toString()),foregroundTypesRequested); beforeCleanup() } }
+ private fun terminalStop(cause:TerminalCause,beforeCleanup:()->Unit={}):Boolean = terminalStops.stop(cause,beforeCleanup)
  private fun stop(){ terminalStop(TerminalCause.EXPLICIT_STOP) }
  private fun performTeardown(){
   val failures=mutableListOf<String>()
@@ -225,7 +229,7 @@ class AudioReactiveService : Service() {
   if(failures.isNotEmpty()){Log.w(TAG,"$CLEANUP_FAILURE_DIAGNOSTIC: ${failures.joinToString()}")}
   attempt("broadcast"){invalidAdmissionGeneration?.let{generation->invalidAdmissionGeneration=null;broadcastAdmissionFailed(generation)}?:broadcast()};attempt("foreground"){stopForeground(STOP_FOREGROUND_REMOVE)};attempt("self"){stopSelf()}
  }
- override fun onDestroy(){terminalStop(TerminalCause.DESTROY);worker.shutdownNow();super.onDestroy()}
+ override fun onDestroy(){AudioReactiveServiceCommandDispatch.onDestroy { terminalStop(it) };worker.shutdownNow();super.onDestroy()}
  private fun channel()=(getSystemService(NOTIFICATION_SERVICE)as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL,getString(R.string.notification_capture_channel),NotificationManager.IMPORTANCE_LOW))
  private fun notification(animation:Boolean=false)=NotificationCompat.Builder(this,CHANNEL).setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(if(animation) getString(R.string.notification_animation_title) else getString(R.string.notification_capture_channel)).setContentText(if(animation) getString(R.string.notification_animation_text) else getString(R.string.notification_capture_text)).setOngoing(true).build()
  private fun broadcastAdmissionFailed(generation:Long){MqttControlService.notifyDiagnosticChanged();sendBroadcast(Intent(ACTION_CAPTURE_STATE_CHANGED).setPackage(packageName).putExtra(EXTRA_ADMISSION_GENERATION,generation).putExtra(EXTRA_ADMISSION_FAILED,true))}
