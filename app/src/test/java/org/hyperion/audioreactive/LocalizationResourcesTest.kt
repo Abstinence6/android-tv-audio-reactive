@@ -36,7 +36,7 @@ class LocalizationResourcesTest {
             "output_mode_labels" to OutputMode.entries.size,
             "video_quality_labels" to VideoQuality.entries.size,
             "video_effect_labels" to VideoEffect.entries.size,
-            "video_audio_effect_labels" to VideoAudioEffect.entries.size,
+            "video_audio_effect_labels" to VideoAudioEffectCatalogue.visible.size,
             "animation_effect_labels" to AnimationEffect.entries.size,
             "animation_colour_labels" to AnimationColour.entries.size,
             "local_visual_pattern_labels" to LocalVisualPattern.entries.size,

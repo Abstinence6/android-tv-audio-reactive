@@ -46,4 +46,24 @@ class LiveTransitionPolicyTest {
         policy.mint(1, "consent")
         assertTrue(policy.decide(LocalTransitionRequest(1, "consent", RenderMode.VIDEO, true)) is TransitionDecision.Accept)
     }
+
+    @Test fun newAudioSourceRequiresLocalRecordAudioForPlaybackAndMicrophoneDirections() {
+        listOf(AudioInput.PLAYBACK, AudioInput.MICROPHONE).forEach { input ->
+            listOf(RenderMode.VIDEO to RenderMode.VIDEO_AUDIO, RenderMode.ANIMATION to RenderMode.AUDIO).forEach { (from, target) ->
+                assertTrue("$input $from -> $target needs admission", AudioSourceAdmissionPolicy.requiresNewAudioSource(from, target))
+                assertFalse("$input $from -> $target denied", AudioSourceAdmissionPolicy.permits(input, from, target, false))
+                assertTrue("$input $from -> $target granted", AudioSourceAdmissionPolicy.permits(input, from, target, true))
+            }
+            assertFalse("$input existing source remains usable", AudioSourceAdmissionPolicy.requiresNewAudioSource(RenderMode.AUDIO, RenderMode.VIDEO_AUDIO))
+            assertTrue(AudioSourceAdmissionPolicy.permits(input, RenderMode.AUDIO, RenderMode.VIDEO_AUDIO, false))
+        }
+        assertFalse(AudioSourceAdmissionPolicy.requiresNewAudioSource(RenderMode.VIDEO_AUDIO, RenderMode.VIDEO))
+    }
+
+    @Test fun playbackAudioRetainsProjectionWhileOnlyAnimationMayReleaseIt() {
+        assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.AUDIO)))
+        assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.VIDEO)))
+        assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.VIDEO_AUDIO)))
+        assertFalse(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.ANIMATION)))
+    }
 }

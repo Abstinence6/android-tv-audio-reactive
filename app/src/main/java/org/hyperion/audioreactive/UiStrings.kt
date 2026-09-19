@@ -8,7 +8,7 @@ object UiStrings {
 
     fun effect(context: Context, value: Effect) = context.array(R.array.effect_labels)[value.ordinal]
     fun videoEffect(context: Context, value: VideoEffect) = context.array(R.array.video_effect_labels)[value.ordinal]
-    fun videoAudioEffect(context: Context, value: VideoAudioEffect) = context.array(R.array.video_audio_effect_labels)[value.ordinal]
+    fun videoAudioEffect(context: Context, value: VideoAudioEffect) = context.array(R.array.video_audio_effect_labels)[VideoAudioEffectCatalogue.visible.indexOf(VideoAudioEffectCatalogue.pickerEffect(value))]
     fun animationEffect(context: Context, value: AnimationEffect) = context.array(R.array.animation_effect_labels)[value.ordinal]
     fun animationColour(context: Context, value: AnimationColour) = context.array(R.array.animation_colour_labels)[value.ordinal]
     fun renderMode(context: Context, value: RenderMode) = context.array(R.array.render_mode_labels)[value.ordinal]
@@ -21,9 +21,9 @@ object UiStrings {
     fun captureStatus(context: Context, value: CaptureStatus) = context.array(R.array.capture_status_texts)[value.ordinal]
 
     fun effectLabels(context: Context, settings: AudioSettings): List<String> = when (settings.renderMode) {
-        RenderMode.AUDIO -> Effect.entries.map { effect(context, it) }
+        RenderMode.AUDIO -> EffectCatalogue.visible.map { effect(context, it) }
         RenderMode.VIDEO -> VideoEffect.entries.map { videoEffect(context, it) }
-        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.map { videoAudioEffect(context, it) }
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.visible.map { videoAudioEffect(context, it) }
         RenderMode.ANIMATION -> AnimationEffect.entries.map { animationEffect(context, it) }
     }
 }

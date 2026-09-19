@@ -80,9 +80,21 @@ class WledPerimeterMapper(private val input: SourceFrameSpec, private val calibr
             val y = when (edge) { ScreenEdge.BOTTOM -> bounds.bottom - insetY - d; ScreenEdge.TOP -> bounds.top + insetY + d; ScreenEdge.RIGHT, ScreenEdge.LEFT -> lateralY }.coerceIn(bounds.top, bounds.bottom)
             val source = (y * input.width + x) * 3; r += rgb[source].toInt() and 255; g += rgb[source + 1].toInt() and 255; b += rgb[source + 2].toInt() and 255
         }
-        reusable[destination] = corrected((r / depth).toByte()); reusable[destination + 1] = corrected((g / depth).toByte()); reusable[destination + 2] = corrected((b / depth).toByte())
+        val averageR = r / depth; val averageG = g / depth; val averageB = b / depth
+        correctedRgb(averageR, averageG, averageB, destination)
     }
-    private fun corrected(value: Byte): Byte = (((value.toInt() and 255) / 255.0).pow(1.0 / calibration.gamma) * calibration.brightnessLimit * 255.0).toInt().coerceIn(0, 255).toByte()
+    /** Gamma changes luminance once from the dominant channel, preserving chroma ratios. */
+    private fun correctedRgb(r: Int, g: Int, b: Int, destination: Int) {
+        val maximum = maxOf(r, g, b)
+        if (maximum == 0) {
+            reusable[destination] = 0; reusable[destination + 1] = 0; reusable[destination + 2] = 0
+            return
+        }
+        val value = ((maximum / 255.0).pow(1.0 / calibration.gamma) * calibration.brightnessLimit * 255.0).toInt().coerceIn(0, 255)
+        reusable[destination] = (value * r / maximum).toByte()
+        reusable[destination + 1] = (value * g / maximum).toByte()
+        reusable[destination + 2] = (value * b / maximum).toByte()
+    }
     companion object { /** One shared edge order: map() must not allocate an edge array on every frame. */ internal val edgeOrder = ScreenEdge.entries }
 }
 

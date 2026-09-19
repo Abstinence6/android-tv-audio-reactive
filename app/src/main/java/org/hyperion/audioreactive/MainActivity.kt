@@ -284,9 +284,9 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                     if (suppressEffectSelection) return
                     val s = effectiveRenderSettings()
                     when (s.renderMode) {
-                        RenderMode.AUDIO -> Effect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setEffect(value) else RuntimeSettings.update { it.copy(effect = value) } }
+                        RenderMode.AUDIO -> EffectCatalogue.visible.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setEffect(value) else RuntimeSettings.update { it.copy(effect = value) } }
                         RenderMode.VIDEO -> VideoEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoEffect(value) else RuntimeSettings.update { it.copy(videoEffect = value) } }
-                        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoAudioEffect(value) else RuntimeSettings.update { it.copy(videoAudioEffect = value) } }
+                        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.visible.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setVideoAudioEffect(value) else RuntimeSettings.update { it.copy(videoAudioEffect = value) } }
                         RenderMode.ANIMATION -> AnimationEffect.entries.getOrNull(position)?.let { value -> if (AudioReactiveService.exists()) LiveRendererSettings.setAnimationEffect(value) else RuntimeSettings.update { it.copy(animationEffect = value) } }
                     }
                 }
@@ -497,12 +497,12 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         val previous = effectiveRenderSettings().renderMode
         val result = CaptureModeCheckboxPolicy.resolve(audioBox.isChecked, videoBox.isChecked, animationBox.isChecked, previous)
         if (AudioReactiveService.exists() && !result.rejected) {
-            if (previous == RenderMode.ANIMATION && result.mode != RenderMode.ANIMATION) {
-                // Only this visible UI path may obtain a fresh projection result.
+            val needsPermission = AudioSourceAdmissionPolicy.requiresNewAudioSource(previous, result.mode) && !hasRecordAudioPermission()
+            if (needsPermission || (previous == RenderMode.ANIMATION && result.mode != RenderMode.ANIMATION)) {
+                // Only this visible UI path can obtain permission/projection capabilities for a new source.
                 pendingLocalTransition = result.mode
-                if (RenderRequirements.forMode(result.mode).audio && !hasRecordAudioPermission()) {
-                    ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
-                } else requestLocalProjection()
+                if (needsPermission) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                else requestLocalProjection()
             } else dispatchLocalTransition(result.mode, null)
         } else if (!AudioReactiveService.exists() && !result.rejected) RuntimeSettings.update { it.copy(renderMode = result.mode) }
         val visible = LiveRenderModeUiPolicy.checkboxes(if (result.rejected) previous else result.mode)
@@ -1003,7 +1003,12 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         if (code == 1) {
             val local = pendingLocalTransition
             if (local != null) {
-                if (grants.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestLocalProjection() else pendingLocalTransition = null
+                if (grants.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    if (effectiveRenderSettings().renderMode == RenderMode.ANIMATION) requestLocalProjection() else {
+                        pendingLocalTransition = null
+                        dispatchLocalTransition(local, null)
+                    }
+                } else pendingLocalTransition = null
             } else pendingPermissionGeneration?.let { generation ->
                 pendingPermissionGeneration = null
                 captureToggleCoordinator.onRecordAudioPermissionResult(generation, grants.firstOrNull() == PackageManager.PERMISSION_GRANTED)

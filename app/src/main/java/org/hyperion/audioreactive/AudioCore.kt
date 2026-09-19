@@ -28,6 +28,10 @@ class AudioFeatures(
     var tempoConfidence: Float = 0f,
     /** -1 is fully left, +1 is fully right; mono analysis is centered at zero. */
     var stereoBalance: Float = 0f,
+    /** 0=low-frequency weighted, 1=high-frequency weighted spectrum centroid. */
+    var spectralCentroid: Float = 0f,
+    /** Positive frame-to-frame normalized spectral novelty, independent of loudness. */
+    var spectralFlux: Float = 0f,
 ) {
     companion object { const val BAND_COUNT = 16 }
 }
@@ -63,6 +67,31 @@ enum class Effect(val wled1dReferenceStyle: Boolean = false) {
     NOISEMOVE(true), ROCKTAVES(true)
 }
 
+/** Android presents one compact representative for each legacy family; wire tokens remain stable. */
+object EffectCatalogue {
+    val visible: List<Effect> = Effect.entries.takeWhile { it != Effect.RIPPLE_PEAK }
+
+    /** Retained legacy selections resolve to a visible representative without rewriting persistence. */
+    fun pickerEffect(effect: Effect): Effect = when (effect) {
+        Effect.RIPPLE_PEAK, Effect.PUDDLEPEAK -> Effect.BEAT_RIPPLE
+        Effect.GRAVCENTER -> Effect.BASS_PULSE
+        Effect.GRAVCENTRIC, Effect.GRAVFREQ -> Effect.BASS_GRADIENT
+        Effect.GRAVIMETER, Effect.NOISEMETER -> Effect.VU_PEAK_HOLD
+        Effect.JUGGLES -> Effect.JUGGLE
+        Effect.MATRIPIX, Effect.PIXELS, Effect.FREQPIXELS -> Effect.FIREFLIES
+        Effect.MIDNOISE, Effect.NOISEMOVE -> Effect.DYNAMIC_HUE
+        Effect.NOISEFIRE -> Effect.FIRE
+        Effect.PIXELWAVE, Effect.FREQWAVE -> Effect.WAVE_BANDS
+        Effect.PLASMOID -> Effect.PLASMA
+        Effect.PUDDLES -> Effect.OCEAN
+        Effect.BLURZ -> Effect.BLURZ_TRAILS
+        Effect.DJ_LIGHT -> Effect.PULSE
+        Effect.FREQMAP -> Effect.SPECTRUM
+        Effect.FREQMATRIX, Effect.ROCKTAVES -> Effect.EQUALIZER_SWEEP
+        else -> effect
+    }
+}
+
 /**
  * Fixed-size PCM analyzer. It uses a Hann window and 16 logarithmically spaced probes rather
  * than a dependency-heavy FFT. All adaptive state is clamped, and the only working band array
@@ -73,6 +102,7 @@ class PcmAnalyzer {
     private val bandEnvelope = FloatArray(AudioFeatures.BAND_COUNT)
     private val bandPeak = FloatArray(AudioFeatures.BAND_COUNT) { MIN_BAND_PEAK }
     private val bandNoiseFloor = FloatArray(AudioFeatures.BAND_COUNT)
+    private val previousSpectrum = FloatArray(AudioFeatures.BAND_COUNT)
     private var hannWindow = FloatArray(CaptureCadence.ANALYSIS_SAMPLES)
     private var windowCount = 0
     private val reusableFeatures = AudioFeatures(0f, 0f, 0f, 0f, 0f, 0f, bands)
@@ -99,7 +129,7 @@ class PcmAnalyzer {
     private var stereoMono = ShortArray(CaptureCadence.ANALYSIS_SAMPLES)
 
     fun reset() {
-        bands.fill(0f); bandEnvelope.fill(0f); bandPeak.fill(MIN_BAND_PEAK); bandNoiseFloor.fill(0f)
+        bands.fill(0f); bandEnvelope.fill(0f); bandPeak.fill(MIN_BAND_PEAK); bandNoiseFloor.fill(0f); previousSpectrum.fill(0f)
         smoothedLevel = 0f; adaptivePeak = MIN_ADAPTIVE_PEAK; noiseFloor = 0f; previousLevel = 0f
         onsetBaseline = 0f; onsetRefractoryFrames = 0
         resetBeatState(clearSequence = true)
@@ -173,11 +203,16 @@ class PcmAnalyzer {
         previousLevel = smoothedLevel
         val onset = boundedOnset(rawOnset, gated > 0f)
         for (band in bands.indices) bands[band] = probeBand(pcm, count, mean, band, gain)
+        val centroid = spectralCentroid()
+        val flux = spectralFlux()
         val bass = averageBands(0, 4)
         val mid = averageBands(5, 10)
         val treble = averageBands(11, AudioFeatures.BAND_COUNT)
         updateBeat(bass, mid, smoothedLevel, gated > 0f, beatThreshold, timestamp)
-        return setFeatures(smoothedLevel, (peak * gain).coerceIn(0f, 1f), onset, bass, mid, treble, gated > 0f)
+        return setFeatures(smoothedLevel, (peak * gain).coerceIn(0f, 1f), onset, bass, mid, treble, gated > 0f).also {
+            it.spectralCentroid = centroid
+            it.spectralFlux = flux
+        }
     }
 
     private fun features(rms: Float, peak: Float, onset: Float): AudioFeatures {
@@ -188,6 +223,7 @@ class PcmAnalyzer {
         reusableFeatures.rms = rms; reusableFeatures.peak = peak; reusableFeatures.onset = onset
         reusableFeatures.bass = bass; reusableFeatures.mid = mid; reusableFeatures.treble = treble
         reusableFeatures.signalPresent = signalPresent
+        if (!signalPresent) { reusableFeatures.spectralCentroid = 0f; reusableFeatures.spectralFlux = 0f }
         reusableFeatures.beatSequence = beatSequence
         reusableFeatures.beatStrength = beatStrength
         reusableFeatures.beatTimestampNanos = if (signalPresent) lastBeatTimestampNanos.coerceAtLeast(0L) else 0L
@@ -196,6 +232,16 @@ class PcmAnalyzer {
         return reusableFeatures
     }
     private fun averageBands(start: Int, end: Int): Float { var sum = 0f; for (i in start until end) sum += bands[i]; return sum / (end - start) }
+    private fun spectralCentroid(): Float {
+        var energy = 0f; var weighted = 0f
+        for (index in bands.indices) { val value = bands[index]; energy += value; weighted += value * index }
+        return if (energy > 0f) (weighted / energy / bands.lastIndex).coerceIn(0f, 1f) else 0f
+    }
+    private fun spectralFlux(): Float {
+        var rising = 0f; var total = 0f
+        for (index in bands.indices) { val value = bands[index]; rising += (value - previousSpectrum[index]).coerceAtLeast(0f); total += value; previousSpectrum[index] = value }
+        return if (total > 0f) (rising / total).coerceIn(0f, 1f) else 0f
+    }
     private fun takeTimestamp(sampleCount: Int): Long {
         if (suppliedTimestampNanos >= 0L) {
             val timestamp = suppliedTimestampNanos
@@ -256,6 +302,7 @@ class PcmAnalyzer {
     private fun decayToSilence() {
         for (band in bands.indices) {
             bandEnvelope[band] *= (1f - BAND_RELEASE)
+            previousSpectrum[band] *= (1f - BAND_RELEASE)
             if (bandEnvelope[band] < SILENCE_EPSILON) bandEnvelope[band] = 0f
             bands[band] = bandEnvelope[band]
         }
@@ -407,7 +454,7 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
         when (effect) {
             Effect.MONOCHROME -> setGray(x, f.rms * level)
             // Spectrum is smoothed for a continuous spectral gradient; MEL is direct 16-band GEQ.
-            Effect.SPECTRUM -> setHsv(x, 15f + p * 300f + parameters.hueShift, .94f, smoothBand(f, x) * level)
+            Effect.SPECTRUM -> setHsv(x, 15f + p * 300f + parameters.hueShift + f.spectralCentroid * 42f, .94f, smoothBand(f, x) * (1f + f.spectralFlux * .22f).coerceAtMost(1f) * level)
             Effect.MEL_SPECTRUM -> setHsv(x, 15f + p * 300f, .94f, band * level)
             // Pulse is global RMS/onset; Bass Pulse propagates outward from the centre.
             Effect.PULSE -> setHsv(x, 335f + p * 48f, .88f, (f.rms + f.onset * .68f).coerceIn(0f, 1f) * level)

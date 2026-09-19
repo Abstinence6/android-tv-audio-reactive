@@ -5,15 +5,31 @@ enum class VideoEffect {
     NORMAL, SATURATION, CONTRAST
 }
 
+/** Persisted VIDEO_AUDIO catalogue. Names and ordinals are stable MQTT/settings identifiers. */
 enum class VideoAudioEffect {
-    BRIGHTNESS_PULSE, BEAT_PULSE, EQ,
-    COMET, RIPPLE, BASS_SWEEP,
-    SPECTRAL_BANDS, CENTER_BEAT_BURST,
-    EDGE_PULSE, STEREO_BALANCE,
-    FREQUENCY_GRADIENT, BEAT_STROBE,
-    COMET_TRAILS, BASS_WAVE, VOCAL_FOCUS,
-    SILENCE_BREATHING, ADAPTIVE_SHIMMER,
-    BEAT_COLOUR_TEMPERATURE
+    BRIGHTNESS_PULSE, BEAT_PULSE, EQ, COMET, RIPPLE, BASS_SWEEP,
+    SPECTRAL_BANDS, CENTER_BEAT_BURST, EDGE_PULSE, STEREO_BALANCE,
+    FREQUENCY_GRADIENT, BEAT_STROBE, COMET_TRAILS, BASS_WAVE, VOCAL_FOCUS,
+    SILENCE_BREATHING, ADAPTIVE_SHIMMER, BEAT_COLOUR_TEMPERATURE
+}
+
+/** TV exposes differentiated families while persistence, MQTT and HA retain every historic token. */
+object VideoAudioEffectCatalogue {
+    val visible = listOf(
+        VideoAudioEffect.BRIGHTNESS_PULSE, VideoAudioEffect.BEAT_PULSE, VideoAudioEffect.EQ,
+        VideoAudioEffect.COMET, VideoAudioEffect.RIPPLE, VideoAudioEffect.BASS_SWEEP,
+    )
+    fun pickerEffect(effect: VideoAudioEffect): VideoAudioEffect = when (effect) {
+        VideoAudioEffect.SPECTRAL_BANDS, VideoAudioEffect.FREQUENCY_GRADIENT -> VideoAudioEffect.EQ
+        VideoAudioEffect.CENTER_BEAT_BURST, VideoAudioEffect.BEAT_STROBE, VideoAudioEffect.BEAT_COLOUR_TEMPERATURE -> VideoAudioEffect.BEAT_PULSE
+        VideoAudioEffect.EDGE_PULSE, VideoAudioEffect.VOCAL_FOCUS, VideoAudioEffect.SILENCE_BREATHING -> VideoAudioEffect.BRIGHTNESS_PULSE
+        VideoAudioEffect.STEREO_BALANCE, VideoAudioEffect.BASS_WAVE -> VideoAudioEffect.BASS_SWEEP
+        VideoAudioEffect.COMET_TRAILS -> VideoAudioEffect.COMET
+        VideoAudioEffect.ADAPTIVE_SHIMMER -> VideoAudioEffect.RIPPLE
+        else -> effect
+    }
+    /** SharedPreferences and MQTT persist enum names, never localized picker labels. */
+    fun fromPersistedName(name: String?): VideoAudioEffect? = VideoAudioEffect.entries.firstOrNull { it.name == name }
 }
 
 /** Effects that intentionally need neither playback audio nor screen capture. */
@@ -52,9 +68,9 @@ object VideoColourTreatmentPolicy {
 /** Pure selector state prevents a stale enum index from crossing capture-mode catalogues. */
 object EffectSelectorPolicy {
     fun selectedIndex(settings: AudioSettings): Int = when (settings.renderMode) {
-        RenderMode.AUDIO -> settings.effect.ordinal
+        RenderMode.AUDIO -> EffectCatalogue.visible.indexOf(EffectCatalogue.pickerEffect(settings.effect)).coerceAtLeast(0)
         RenderMode.VIDEO -> settings.videoEffect.ordinal
-        RenderMode.VIDEO_AUDIO -> settings.videoAudioEffect.ordinal
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.visible.indexOf(VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect)).coerceAtLeast(0)
         RenderMode.ANIMATION -> settings.animationEffect.ordinal
     }
 

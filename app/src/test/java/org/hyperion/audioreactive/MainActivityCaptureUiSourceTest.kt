@@ -39,6 +39,12 @@ class MainActivityCaptureUiSourceTest {
         assertTrue(source.contains("registerAudioDeviceCallback(voiceInputDeviceCallback, null)"))
     }
 
+    @Test fun recordAudioGrantResumesThePendingLiveTransitionWithoutProjectionWhenItAlreadyExists() {
+        assertTrue(source.contains("AudioSourceAdmissionPolicy.requiresNewAudioSource(previous, result.mode)"))
+        assertTrue(source.contains("if (needsPermission) ActivityCompat.requestPermissions"))
+        assertTrue(source.contains("pendingLocalTransition = null\n                        dispatchLocalTransition(local, null)"))
+    }
+
     @Test fun singleScreenUsesCompactIndicatorAndKeepsOnlyLocalMaintenanceActions() {
         assertTrue(source.contains("captureIndicator.text = CaptureUiPresentation.indicator"))
         assertTrue(source.contains("text = getString(R.string.screen_test"))

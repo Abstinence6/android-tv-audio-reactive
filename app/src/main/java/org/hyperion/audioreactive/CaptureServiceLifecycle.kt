@@ -18,6 +18,8 @@ internal class CaptureServiceLifecycle(
     private val monitor = Any()
     private val teardownRequested = AtomicBoolean(false)
     private var phase = Phase.IDLE
+    /** The exact projection token the service deliberately relinquished for ANIMATION. */
+    private var intentionallyReleasedProjection: Any? = null
 
     /** Atomically admits the exact route handoff only while teardown has not begun. */
     fun beginStart(reserveAdmission: () -> Boolean): Boolean = synchronized(monitor) {
@@ -64,6 +66,27 @@ internal class CaptureServiceLifecycle(
         if (!isActive()) return false
         action()
         return isActive()
+    }
+
+    /**
+     * Marks one projection token before stopping it while the transition gate is held. Its callback
+     * is then an expected resource-release acknowledgement, not a service-wide revocation.
+     */
+    fun releaseProjection(projection: Any, release: () -> Unit): Boolean = synchronized(monitor) {
+        if (!isActive()) return false
+        intentionallyReleasedProjection = projection
+        release()
+        return isActive()
+    }
+
+    /** Unexpected projection revocation still takes the terminal fail-closed teardown path. */
+    fun onProjectionStopped(projection: Any, unexpectedStop: () -> Unit): Boolean = synchronized(monitor) {
+        if (intentionallyReleasedProjection === projection) {
+            intentionallyReleasedProjection = null
+            return false
+        }
+        unexpectedStop()
+        return true
     }
 
     /** Linearizes cancellation, terminal cause selection, cleanup, and every startup action. */

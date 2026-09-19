@@ -171,6 +171,36 @@ class VideoModePolicyTest {
         }
     }
 
+    @Test fun compactVideoAudioFamiliesDifferForEqualVolumeSpectralOnsetAndBeatFixtures() {
+        fun processor() = VideoFrameProcessor(16, 1).also { p ->
+            val field = VideoFrameProcessor::class.java.getDeclaredField("video").apply { isAccessible = true }
+            (field.get(p) as ByteArray).fill(80)
+        }
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .7f)
+        val spectral = AudioFeatures(.6f, .6f, .15f, .2f, .4f, .9f, FloatArray(16) { if (it == 13) 1f else .05f }, true, 1L, .8f, 1_000_000_000L, 120f, 1f, -.5f, .85f, .9f)
+        val onset = AudioFeatures(.6f, .6f, .95f, .7f, .4f, .2f, FloatArray(16) { if (it == 2) .9f else .1f }, true, 2L, 1f, 1_100_000_000L, 120f, 1f, .4f, .2f, .95f)
+        val outputs = VideoAudioEffectCatalogue.visible.map { effect ->
+            val p = processor()
+            // Beat is primed then given a fresh sequence; all fixtures have equal RMS.
+            p.compose(spectral, base.copy(videoAudioEffect = effect), 1_000_000_000L)
+            p.compose(onset, base.copy(videoAudioEffect = effect), 1_100_000_000L).toList()
+        }
+        assertEquals(VideoAudioEffectCatalogue.visible.size, outputs.distinct().size)
+        val lowSpectrum = AudioFeatures(.6f, .6f, .15f, .2f, .4f, .9f, FloatArray(16) { if (it == 13) 1f else .05f }, true, 1L, .8f, 1_000_000_000L, 120f, 1f, -.5f, .05f, .1f)
+        val lowCentroid = processor().compose(lowSpectrum, base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE), 1_200_000_000L)
+        val highCentroid = processor().compose(spectral, base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE), 1_200_000_000L)
+        assertFalse(lowCentroid.contentEquals(highCentroid))
+    }
+
+    @Test fun compactVideoAudioZeroEnergyIsSafeAndLeavesVideoUnaccented() {
+        val p = VideoFrameProcessor(16, 1)
+        val field = VideoFrameProcessor::class.java.getDeclaredField("video").apply { isAccessible = true }
+        (field.get(p) as ByteArray).fill(90)
+        val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .7f)
+        val silent = AudioFeatures(0f, 0f, 0f, 0f, 0f, 0f, FloatArray(16), false)
+        VideoAudioEffect.entries.forEach { effect -> assertArrayEquals(ByteArray(48) { 90.toByte() }, p.compose(silent, base.copy(videoAudioEffect = effect), 1_000_000_000L).copyOf()) }
+    }
+
     @Test fun stereoAnalyzerPreservesARealLeftRightEnergyBalance() {
         val analyzer = PcmAnalyzer()
         val left = ShortArray(64 * 2) { index -> if (index % 2 == 0) 12_000 else 1_000 }

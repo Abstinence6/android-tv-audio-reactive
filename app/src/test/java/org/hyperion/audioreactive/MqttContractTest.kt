@@ -116,6 +116,34 @@ class MqttContractTest {
         } finally { LiveRendererSettings.end() }
     }
 
+    @Test fun everyPersistedLegacyEffectIsAdvertisedByHaAndTheUiCatalogue() {
+        Effect.entries.forEach { legacy ->
+            val settings = AudioSettings.defaults().copy(effect = legacy)
+            assertTrue(EffectSelectorPolicy.names(settings).contains(legacy.name))
+            assertTrue(VideoEffectCatalog.compatible(RenderMode.AUDIO, legacy.name))
+            val discovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.EFFECT_DISCOVERY }.payload
+            assertTrue("retained ${legacy.name} absent from HA options", discovery.contains("\"${legacy.name}\""))
+            val settingDiscovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.settingDiscoveryTopic("effect") }.payload
+            assertTrue("persisted ${legacy.name} absent from settings options", settingDiscovery.contains("\"${legacy.name}\""))
+        }
+    }
+
+    @Test fun everyOriginalVideoAudioTokenParsesActivatesAndRemainsAdvertisedWhilePickerStaysCompact() {
+        assertEquals(6, VideoAudioEffectCatalogue.visible.size)
+        VideoAudioEffect.entries.forEach { legacy ->
+            val settings = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, videoAudioEffect = legacy)
+            assertEquals(legacy, VideoAudioEffectCatalogue.fromPersistedName(legacy.name))
+            assertEquals(settings, EffectSelectorPolicy.withActiveName(settings, legacy.name))
+            assertEquals(MqttContract.Command.SetEffect(legacy.name), MqttContract.parseCommand(MqttContract.EFFECT_COMMAND, legacy.name, false))
+            assertEquals(legacy, MqttSettingsPolicy.apply(settings, MqttContract.Command.SetSetting("video_audio_effect", legacy.name))?.videoAudioEffect)
+            val discovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.EFFECT_DISCOVERY }.payload
+            val settingDiscovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.settingDiscoveryTopic("video_audio_effect") }.payload
+            assertTrue("HA active options omit ${legacy.name}", discovery.contains("\"${legacy.name}\""))
+            assertTrue("HA settings options omit ${legacy.name}", settingDiscovery.contains("\"${legacy.name}\""))
+            assertTrue(VideoAudioEffectCatalogue.pickerEffect(legacy) in VideoAudioEffectCatalogue.visible)
+        }
+    }
+
     @Test fun calibrationAndSelectedRoutesOnlyAcceptKnownInventory() {
         val device = WledDevice("mac:AABBCCDDEEFF", "TV", "10.1.2.3", 16, 21324)
         val base = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(device))

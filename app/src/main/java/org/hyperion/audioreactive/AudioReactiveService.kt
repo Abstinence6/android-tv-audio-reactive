@@ -65,7 +65,7 @@ class AudioReactiveService : Service() {
      assign = { projection=it },
    )) return
    val p=projection?:return
-   if(!lifecycle.whileStarting { p.registerCallback(object:MediaProjection.Callback(){override fun onStop(){stop()}},null) }) return
+   if(!lifecycle.whileStarting { p.registerCallback(projectionCallback(p),null) }) return
    if(s.requiresAudio()&&!lifecycle.acquire(acquire={createAudio(p,s)},release={it.stop();it.release()},assign={recorder=it})) return
    if(s.requiresVideo()&&!createVideoWhileStarting(p)) return
    if(!lifecycle.acquire(acquire={ admission.consume { ids -> OutputRouter.create(s,ids.wled,ids.hyperion) } },release={it.stop()},assign={router=it})) return
@@ -113,15 +113,24 @@ class AudioReactiveService : Service() {
    gate.mint(epoch,nonce)
    if(gate.decide(LocalTransitionRequest(epoch,nonce,target,result)) !is TransitionDecision.Accept) return@whileActive
    try {
+    val current = gate.current()
+    if (!AudioSourceAdmissionPolicy.permits(requireNotNull(admittedSettings).audioInput, current, target, checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)) return@whileActive
     val needs=RenderRequirements.forMode(target)
     var p=projection
     if(needs.video || needs.audio) {
-     if(p==null) { p=(getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(Activity.RESULT_OK,requireNotNull(data))?:error("projection"); projection=p; p!!.registerCallback(object:MediaProjection.Callback(){override fun onStop(){stop()}},null) }
+     if(p==null) { p=(getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(Activity.RESULT_OK,requireNotNull(data))?:error("projection"); projection=p; p!!.registerCallback(projectionCallback(p!!),null) }
      if(needs.audio && recorder==null) recorder=createAudio(p!!,requireNotNull(admittedSettings))
      if(needs.video && reader==null && !createVideo(p!!)) error("video source unavailable")
     }
     if(!needs.audio) releaseAudio()
-    if(!needs.video) { releaseVideo(); projection?.stop(); projection=null }
+    if(!needs.video) releaseVideo()
+    // Playback capture remains projection-backed in AUDIO mode; only ANIMATION releases it.
+    if(!ProjectionOwnershipPolicy.retainsProjection(needs)) {
+     projection?.let { owned ->
+      // The projection callback is serialized with this gate and acknowledges this exact release.
+      if(lifecycle.releaseProjection(owned) { owned.stop() }) projection=null
+     }
+    }
     setForegroundTypesFor(needs)
     gate.commit(target)
     LiveRendererSettings.commitRenderMode(target)
@@ -134,6 +143,9 @@ class AudioReactiveService : Service() {
   val types=if(!needs.audio && !needs.video) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if(needs.audio && admittedSettings?.audioInput==AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
   startForeground(ID,notification(!needs.audio&&!needs.video),types)
  }
+ private fun projectionCallback(owned:MediaProjection)=object:MediaProjection.Callback(){override fun onStop(){
+  lifecycle.onProjectionStopped(owned) { stop() }
+ }}
  private fun reconcileSources(p:MediaProjection,s:AudioSettings):Boolean = lifecycle.whileActive {
   if(s.requiresAudio()&&recorder==null) {
    if(s.audioInput==AudioInput.MICROPHONE) startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)

@@ -271,6 +271,24 @@ class AudioCoreTest {
         }
     }
 
+    @Test fun syntheticBassAndTrebleFixturesProduceDifferentCentroidFluxAndSpatialFrames() {
+        val bass = PcmAnalyzer().analyze(tone(80.0, 22_000), 1_024, 1f, .2f, 100_000_000L)
+        val treble = PcmAnalyzer().analyze(tone(7_830.0, 22_000), 1_024, 1f, .2f, 100_000_000L)
+        assertTrue("centroid bass=${bass.spectralCentroid} treble=${treble.spectralCentroid}", treble.spectralCentroid > bass.spectralCentroid)
+        assertTrue(bass.spectralFlux in 0f..1f && treble.spectralFlux in 0f..1f)
+        val lowFrame = EffectRenderer.renderImage(Effect.SPECTRUM, bass, .8f, 7)
+        val highFrame = EffectRenderer.renderImage(Effect.SPECTRUM, treble, .8f, 7)
+        assertFalse("spectrum must respond to spectral shape, not only volume", lowFrame.contentEquals(highFrame))
+    }
+
+    @Test fun legacyPickerTokensRemainParseableWhileTheAndroidPickerUsesVisibleAliases() {
+        assertTrue(EffectCatalogue.visible.size < Effect.entries.size)
+        assertTrue(EffectCatalogue.visible.contains(Effect.PULSE))
+        assertEquals(Effect.PULSE, EffectCatalogue.pickerEffect(Effect.DJ_LIGHT))
+        assertEquals(Effect.BEAT_RIPPLE, EffectCatalogue.pickerEffect(Effect.RIPPLE_PEAK))
+        assertEquals(Effect.PULSE, MqttSettingsPolicy.apply(AudioSettings.defaults(), MqttContract.Command.SetSetting("effect", "PULSE"))?.effect)
+    }
+
     private fun pixels(frame: ByteArray): List<List<Int>> = (0 until frame.size step 3).map { listOf(frame[it].toInt() and 255, frame[it + 1].toInt() and 255, frame[it + 2].toInt() and 255) }
 
     @Test fun silenceAndDcAreNoiseGatedAfterDcRemoval() {

@@ -186,4 +186,37 @@ class CaptureServiceLifecycleTest {
         assertEquals(0L, cleanupDone.count)
         assertFalse(lifecycle.whileActive { throw AssertionError("source replacement after stop") })
     }
+
+    @Test fun everyCaptureModeCanReleaseItsProjectionForAnimationWithoutStoppingTheLiveRouter() {
+        listOf(RenderMode.AUDIO, RenderMode.VIDEO, RenderMode.VIDEO_AUDIO).forEach { from ->
+            var cleanupCount = 0
+            var routerRetained = true
+            val lifecycle = CaptureServiceLifecycle(cleanup = { cleanupCount++; routerRetained = false })
+            assertTrue("$from start", lifecycle.beginStart { true })
+            assertTrue("$from active", lifecycle.activate { })
+            val projection = Any()
+            var releaseCallbackWasExpected = false
+
+            assertTrue("$from release", lifecycle.releaseProjection(projection) {
+                releaseCallbackWasExpected = !lifecycle.onProjectionStopped(projection) { lifecycle.stop() }
+            })
+
+            assertTrue("$from callback", releaseCallbackWasExpected)
+            assertEquals("$from must retain router", 0, cleanupCount)
+            assertTrue("$from must retain active service", routerRetained)
+            assertTrue("$from -> animation remains active", lifecycle.whileActive { })
+        }
+    }
+
+    @Test fun unexpectedProjectionStopRemainsTerminalAndTearsDownTheRouter() {
+        var routerRetained = true
+        val lifecycle = CaptureServiceLifecycle(cleanup = { routerRetained = false })
+        assertTrue(lifecycle.beginStart { true })
+        assertTrue(lifecycle.activate { })
+
+        assertTrue(lifecycle.onProjectionStopped(Any()) { lifecycle.stop() })
+
+        assertFalse(routerRetained)
+        assertFalse(lifecycle.whileActive { })
+    }
 }

@@ -33,6 +33,14 @@ class OutputRoutingTest {
  @Test fun protectedOrBlackVideoImmediatelyBlackoutsAndStopsItsWledRoute(){val output=FakeWled();val router=OutputRouter.forTest(OutputMode.WLED,wled=arrayOf(output));router.start();router.send(ByteArray(48));VideoCaptureFailurePolicy.blackoutAndTerminate{router.stop()};assertEquals(1,output.frames);assertEquals(1,output.blacks);assertEquals(1,output.closes);router.send(ByteArray(48));assertEquals(1,output.frames)}
  @Test fun hyperionRouterRegistersAndClears(){val h=FakeHyperion();val r=OutputRouter.forTest(OutputMode.HYPERION,h);r.start();r.send(ByteArray(48));r.stop();assertEquals(1,h.registers);assertEquals(1,h.frames);assertEquals(1,h.clears)}
  @Test fun failedHyperionRegistrationDoesNotClearPriority(){val h=object:HyperionOutput{var clears=0;var closes=0;override fun register(){throw IllegalStateException("register failed")};override fun send(frame:ByteArray)=Unit;override fun clear(){clears++};override fun close(){closes++}};try{OutputRouter.forTest(OutputMode.HYPERION,h).start();fail("expected registration failure")}catch(_:IllegalStateException){};assertEquals(0,h.clears);assertEquals(1,h.closes)}
+ @Test fun calibratedMapperKeepsZeroEnergyBlackAndColorfulFramesSaturatedInsteadOfWhite(){
+  val calibration=WledScreenCalibration("mac:001122334455",4,0,PerimeterDirection.CW,1,1,1,1,depthPercent=2,samplesPerEdge=4,gamma=2.2f,brightnessLimit=1f)
+  val mapper=WledPerimeterMapper(SourceFrameSpec(4,4,20),calibration)
+  assertTrue(mapper.map(ByteArray(4*4*3)).all { it==0.toByte() })
+  val source=ByteArray(4*4*3); for(index in 0 until 16){ val at=index*3; source[at]=220.toByte(); source[at+1]=35; source[at+2]=10 }
+  val mapped=mapper.map(source)
+  for(at in mapped.indices step 3){ val r=mapped[at].toInt()and 255; val g=mapped[at+1].toInt()and 255; val b=mapped[at+2].toInt()and 255; assertTrue("unexpected white skew: $r,$g,$b", r>g*3 && g>b) }
+ }
  private class FakeHyperion:HyperionOutput{var registers=0;var frames=0;var clears=0;override fun register(){registers++};override fun send(frame:ByteArray){frames++};override fun clear(){clears++};override fun close()=Unit}
  private class FakeWled:WledOutput{var frames=0;var blacks=0;var closes=0;override fun send(frame16:ByteArray){frames++};override fun blackout(){blacks++};override fun close(){closes++}}
 }
