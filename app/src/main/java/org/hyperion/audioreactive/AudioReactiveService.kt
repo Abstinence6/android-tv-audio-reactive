@@ -117,11 +117,17 @@ class AudioReactiveService : Service() {
     if (!AudioSourceAdmissionPolicy.permits(requireNotNull(admittedSettings).audioInput, current, target, checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)) return@whileActive
     val needs=RenderRequirements.forMode(target)
     var p=projection
-    if(needs.video || needs.audio) {
-     if(p==null) { p=(getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(Activity.RESULT_OK,requireNotNull(data))?:error("projection"); projection=p; p!!.registerCallback(projectionCallback(p!!),null) }
-     if(needs.audio && recorder==null) recorder=createAudio(p!!,requireNotNull(admittedSettings))
-     if(needs.video && reader==null && !createVideo(p!!)) error("video source unavailable")
-    }
+    LiveTransitionCoordinator.execute(target,
+     setForegroundTypes = { setForegroundTypesFor(needs) },
+     acquireNeededSources = {
+      if(needs.video || needs.audio) {
+       if(p==null) { p=(getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).getMediaProjection(Activity.RESULT_OK,requireNotNull(data))?:error("projection"); projection=p; p!!.registerCallback(projectionCallback(p!!),null) }
+       if(needs.audio && recorder==null) recorder=createAudio(p!!,requireNotNull(admittedSettings))
+       if(needs.video && reader==null && !createVideo(p!!)) error("video source unavailable")
+      }
+     },
+     commit = {},
+    )
     if(!needs.audio) releaseAudio()
     if(!needs.video) releaseVideo()
     // Playback capture remains projection-backed in AUDIO mode; only ANIMATION releases it.
@@ -131,12 +137,18 @@ class AudioReactiveService : Service() {
       if(lifecycle.releaseProjection(owned) { owned.stop() }) projection=null
      }
     }
+    // Re-apply after release so microphone/data-sync types cannot linger.
     setForegroundTypesFor(needs)
     gate.commit(target)
     LiveRendererSettings.commitRenderMode(target)
     status=when(target){RenderMode.AUDIO->CaptureStatus.CAPTURE_ACTIVE_AUDIO;RenderMode.VIDEO->CaptureStatus.CAPTURE_ACTIVE_VIDEO;RenderMode.VIDEO_AUDIO->CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO;RenderMode.ANIMATION->CaptureStatus.CAPTURE_ACTIVE_ANIMATION}
     LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=status)); broadcast()
-   } catch(_:Exception) { lifecycle.stop { status=CaptureStatus.ROUTER_INIT_FAILED; router?.stop() } }
+   } catch(failure:Exception) {
+    val owned = TransitionDiagnostics.OwnedState(projection != null, recorder != null, reader != null, if (admittedSettings?.audioInput == AudioInput.MICROPHONE && recorder != null) "mediaProjection|microphone" else "mediaProjection")
+    TransitionDiagnostics.report(target, failure, owned)
+    Log.w(TAG, "transition target=${target.name} failure=${failure.javaClass.simpleName} owned=$owned")
+    lifecycle.stop { status=CaptureStatus.ROUTER_INIT_FAILED; router?.stop() }
+   }
   }
  }
  private fun setForegroundTypesFor(needs:RenderRequirements) {

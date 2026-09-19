@@ -147,7 +147,9 @@ class VideoModePolicyTest {
         assertArrayEquals(byteArrayOf(40, 80, 120), saturationFull)
         val silence = processor.compose(null, base.copy(videoEffect = VideoEffect.SATURATION, videoSaturationPercent = 100)).copyOf()
         assertFalse(brightness.contentEquals(eq))
-        for (i in 0..2) assertTrue((brightness[i].toInt() and 255) >= (silence[i].toInt() and 255))
+        // Chroma accents intentionally may lower an individual source channel while preserving bounded RGB.
+        brightness.forEach { assertTrue((it.toInt() and 255) in 0..255) }
+        assertFalse(brightness.contentEquals(silence))
     }
 
     @Test fun everyVideoAudioAccentIsBoundedAndPreservesSourceRgbDirection() {

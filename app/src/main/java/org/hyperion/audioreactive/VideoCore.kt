@@ -14,6 +14,9 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     private var beatPulseAudioActive = false
     private var lastConsumedBeatSequence = 0L
     private var beatPulse = 0f
+    private var cometHead = 0f
+    private var rippleRadius = 0f
+    private var bassSweepHead = 0f
     private var lastPulseTimestampNanos = 0L
     private val silenceBrightness = SilenceBrightnessController()
 
@@ -37,12 +40,22 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     fun compose(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long = System.nanoTime()): ByteArray {
         val hasAudioAccent = settings.renderMode == RenderMode.VIDEO_AUDIO && features?.signalPresent == true
         updateBeatPulse(features, settings, timestampNanos, hasAudioAccent)
+        if (hasAudioAccent) updateSpatialAccents(features!!, settings.videoAudioEffect)
         var p = 0; var zone = 0
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
             val gain = if (hasAudioAccent) videoAudioGain(features, settings.videoAudioEffect, zone, timestampNanos) else 0f
+            // A small chromatic layer remains visible even when a bright source cannot accept gain.
+            // It is blended before brightness, so zero/silent input remains byte-for-byte video.
+            if (hasAudioAccent && gain > 0f) {
+                val accent = videoAudioAccent(features!!, settings.videoAudioEffect, zone)
+                val amount = (gain * settings.audioBoost.coerceIn(0f, 1f) * MAX_CHROMA_ACCENT).coerceIn(0f, MAX_CHROMA_ACCENT)
+                r = (r * (1f - amount) + accent[0] * amount).toInt().coerceIn(0, 255)
+                g = (g * (1f - amount) + accent[1] * amount).toInt().coerceIn(0, 255)
+                b = (b * (1f - amount) + accent[2] * amount).toInt().coerceIn(0, 255)
+            }
             val silenceBase = silenceBrightness.compose(settings, features?.signalPresent, timestampNanos)
-            val brightness = silenceBase * (1f + settings.audioBoost * gain)
+            val brightness = silenceBase * (1f + settings.audioBoost * gain * MAX_BRIGHTNESS_ACCENT)
             if (settings.renderMode != RenderMode.AUDIO) {
                 val saturation = settings.videoSaturationPercent.coerceIn(VideoSaturationPolicy.MIN_PERCENT, VideoSaturationPolicy.MAX_PERCENT) / 100f
                 val average = (r + g + b) / 3f
@@ -112,27 +125,46 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         beatPulse = beatPulse.coerceIn(0f, 1f)
     }
 
-    /** Audio only applies a non-negative brightness accent; it never replaces source hue/chroma. */
+    /** Source hue/chroma is retained; effects differ by spatial placement and temporal state. */
+    private fun updateSpatialAccents(f: AudioFeatures, effect: VideoAudioEffect) {
+        when (VideoAudioEffectCatalogue.pickerEffect(effect)) {
+            VideoAudioEffect.COMET -> cometHead = (cometHead + .018f + f.onset * .22f + f.spectralCentroid * .035f) % 1f
+            VideoAudioEffect.RIPPLE -> rippleRadius = (rippleRadius + .025f + f.spectralFlux * .16f) % 1f
+            VideoAudioEffect.BASS_SWEEP -> bassSweepHead = (bassSweepHead + .012f + f.bass * .13f) % 1f
+            else -> Unit
+        }
+    }
+
     private fun videoAudioGain(f: AudioFeatures?, effect: VideoAudioEffect, zone: Int, timestampNanos: Long): Float {
         if (f?.signalPresent != true) return 0f
-        val position = (zone % PERIMETER_ZONES) / (PERIMETER_ZONES - 1f)
-        val centred = abs(position - .5f) * 2f
-        val band = f.bands[(position * (AudioFeatures.BAND_COUNT - 1)).toInt().coerceIn(0, AudioFeatures.BAND_COUNT - 1)]
+        val x = (zone % width) / (width - 1f).coerceAtLeast(1f)
+        val y = (zone / width) / (height - 1f).coerceAtLeast(1f)
+        val perimeter = when { y < .18f -> x; x > .82f -> 1f + y; y > .82f -> 3f - x; else -> 4f - y } / 4f
+        val band = f.bands[(perimeter * (AudioFeatures.BAND_COUNT - 1)).toInt().coerceIn(0, AudioFeatures.BAND_COUNT - 1)]
+        fun wrappedDistance(a: Float, b: Float): Float { val d = abs(a - b); return minOf(d, 1f - d) }
         return when (VideoAudioEffectCatalogue.pickerEffect(effect)) {
-            // Global uses spectral shape as well as level, so equal-volume low/high fixtures differ.
-            VideoAudioEffect.BRIGHTNESS_PULSE -> (f.rms * (.55f + f.spectralCentroid * .25f + f.spectralFlux * .20f))
-            VideoAudioEffect.BEAT_PULSE -> beatPulse
-            // The sixteen analyzer bands map directly around the output perimeter.
-            VideoAudioEffect.EQ -> band
-            // Onset launches a centroid-positioned head rather than merely recolouring the frame.
-            VideoAudioEffect.COMET -> f.onset * (1f - abs(position - f.spectralCentroid).coerceIn(0f, 1f))
-            // Spectral novelty expands from centre; onset controls attack strength.
-            VideoAudioEffect.RIPPLE -> (f.spectralFlux * f.onset * (1f - abs(centred - f.spectralCentroid).coerceIn(0f, 1f)))
-            // Bass moves the sweep head independently of RMS and high-frequency energy.
-            VideoAudioEffect.BASS_SWEEP -> f.bass * (1f - abs(position - f.bass).coerceIn(0f, 1f))
-            // pickerEffect maps every retained alias above; fail dark if a future token misses it.
+            VideoAudioEffect.BRIGHTNESS_PULSE -> f.rms * (.55f + f.spectralCentroid * .25f + f.spectralFlux * .20f)
+            VideoAudioEffect.BEAT_PULSE -> beatPulse * (if (abs(x - .5f) + abs(y - .5f) < .62f) 1f else .38f)
+            VideoAudioEffect.EQ -> band * (.35f + if (y < .2f || y > .8f || x < .2f || x > .8f) .65f else .18f)
+            VideoAudioEffect.COMET -> f.onset.coerceAtLeast(f.spectralFlux * .45f) * (1f - wrappedDistance(perimeter, cometHead) / .13f).coerceIn(0f, 1f)
+            VideoAudioEffect.RIPPLE -> f.spectralFlux.coerceAtLeast(f.onset * .55f) * (1f - abs(wrappedDistance(perimeter, .5f) - rippleRadius) / .10f).coerceIn(0f, 1f)
+            VideoAudioEffect.BASS_SWEEP -> f.bass * (1f - wrappedDistance(perimeter, bassSweepHead) / .20f).coerceIn(0f, 1f)
             else -> 0f
         }.coerceIn(0f, 1f)
+    }
+
+    /** Deliberately saturated, non-white accents; family masks are supplied by videoAudioGain(). */
+    private fun videoAudioAccent(f: AudioFeatures, effect: VideoAudioEffect, zone: Int): IntArray {
+        val phase = (zone * 37 + (f.spectralCentroid * 127f).toInt() + (f.spectralFlux * 71f).toInt()) and 255
+        return when (VideoAudioEffectCatalogue.pickerEffect(effect)) {
+            VideoAudioEffect.BRIGHTNESS_PULSE -> intArrayOf(30, 120 + phase / 5, 255)
+            VideoAudioEffect.BEAT_PULSE -> intArrayOf(255, 28, 152)
+            VideoAudioEffect.EQ -> intArrayOf(20 + phase / 3, 255, 72)
+            VideoAudioEffect.COMET -> intArrayOf(255, 68, 20 + phase / 4)
+            VideoAudioEffect.RIPPLE -> intArrayOf(42, 104 + phase / 3, 255)
+            VideoAudioEffect.BASS_SWEEP -> intArrayOf(210, 20 + phase / 5, 255)
+            else -> intArrayOf(0, 0, 0)
+        }
     }
 
     private fun VideoAudioEffect.usesBeatEvents() = when (VideoAudioEffectCatalogue.pickerEffect(this)) {
@@ -146,6 +178,8 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         const val PULSE_STRENGTH_RANGE = .78f
         const val DEFAULT_PULSE_DECAY_MILLIS = 420f
         const val MAX_BEAT_EVENT_AGE_NANOS = 500_000_000L
+        const val MAX_CHROMA_ACCENT = .28f
+        const val MAX_BRIGHTNESS_ACCENT = .22f
         const val PERIMETER_ZONES = 16
     }
 }

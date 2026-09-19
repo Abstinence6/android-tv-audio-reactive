@@ -378,6 +378,8 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
     private var activeEffect: Effect? = null
     private var phase = 0f
     private var cometPosition = 0f
+    private var sparkPosition = 0f
+    private var meteorPosition = 0f
     private var emberPosition = 0f
     private var beatCenterRadius = 0f
     private var beatEdgeRadius = 0f
@@ -387,7 +389,7 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
 
     fun reset() {
         trail.fill(0f); peakHold.fill(0f); waterfall.fill(0f); fireHeat.fill(0f); bassPulse.fill(0f)
-        activeEffect = null; phase = 0f; cometPosition = 0f; emberPosition = 0f
+        activeEffect = null; phase = 0f; cometPosition = 0f; sparkPosition = 0f; meteorPosition = 0f; emberPosition = 0f
         beatCenterRadius = 0f; beatEdgeRadius = 0f; beatCenterEnergy = 0f; beatEdgeEnergy = 0f
         deterministicSeed = 0x13579bdf
     }
@@ -404,7 +406,9 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
         val level = brightness.coerceIn(0f, 1f)
         phase += (.035f + features.rms * .045f) * parameters.speed
         if (phase >= TWO_PI) phase -= TWO_PI
-        cometPosition = (cometPosition + (.18f + features.bass * .48f) * parameters.speed) % width
+        cometPosition = (cometPosition + (.12f + features.bass * .62f) * parameters.speed) % width
+        sparkPosition = (sparkPosition + (.55f + features.treble * 1.8f) * parameters.speed) % width
+        meteorPosition = (meteorPosition + (.28f + features.onset * 2.4f + features.bass * .35f) * parameters.speed) % width
         deterministicSeed = deterministicSeed * 1664525 + 1013904223
         updateEffectState(effect, features, parameters)
         for (x in 0 until width) renderPixel(effect, features, level, tick, x, parameters)
@@ -413,7 +417,7 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
 
     private fun resetEffectState(effect: Effect) {
         trail.fill(0f); peakHold.fill(0f); waterfall.fill(0f); fireHeat.fill(0f); bassPulse.fill(0f)
-        emberPosition = 0f; beatCenterRadius = 0f; beatEdgeRadius = 0f; beatCenterEnergy = 0f; beatEdgeEnergy = 0f
+        sparkPosition = 0f; meteorPosition = 0f; emberPosition = 0f; beatCenterRadius = 0f; beatEdgeRadius = 0f; beatCenterEnergy = 0f; beatEdgeEnergy = 0f
         activeEffect = effect
     }
 
@@ -459,15 +463,15 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
             // Pulse is global RMS/onset; Bass Pulse propagates outward from the centre.
             Effect.PULSE -> setHsv(x, 335f + p * 48f, .88f, (f.rms + f.onset * .68f).coerceIn(0f, 1f) * level)
             Effect.BASS_PULSE -> setHsv(x, 335f + p * 48f, .88f, (bassPulse[x] * (1f - centered * .20f)).coerceIn(0f, 1f) * level)
-            Effect.BASS_CHASE -> { val d = circularDistance(x.toFloat(), cometPosition); setHsv(x, 12f + p * 52f, .95f, (f.bass * (1f - d / 5f).coerceIn(0f, 1f) + .05f * wave) * level) }
-            Effect.RUNNING_SPARKS -> { val d = circularDistance(x.toFloat(), cometPosition); trail[x] = max(trail[x] * (.45f + parameters.trail * .5f), (1f - d / 2.2f).coerceIn(0f, 1f) * (f.rms + .35f)); setHsv(x, 38f + p * 42f + parameters.hueShift, .75f, trail[x] * level) }
-            Effect.METEOR_TRAILS -> { val d = (x - cometPosition + width) % width; trail[x] = max(trail[x] * .84f, if (d < 1.2f) (f.onset + f.bass).coerceAtLeast(.35f) else 0f); setHsv(x, 195f + p * 75f, .92f, trail[x] * (1f - d / width * .65f) * level) }
+            Effect.BASS_CHASE -> { val d = (x - cometPosition + width) % width; val head = (1f - d / (2.5f + f.bass * 4f)).coerceIn(0f, 1f); setHsv(x, 4f + f.bass * 38f, .98f, head * f.bass * level) }
+            Effect.RUNNING_SPARKS -> { val d = circularDistance(x.toFloat(), sparkPosition); val spark = pseudo(x, tick / 2) > (.90f - f.treble * .28f); trail[x] = max(trail[x] * (.35f + parameters.trail * .42f), if (spark && d < width *.34f) f.peak else 0f); setHsv(x, 42f + pseudo(x, tick) * 34f + parameters.hueShift, .55f, trail[x] * level) }
+            Effect.METEOR_TRAILS -> { val d = (meteorPosition - x + width) % width; val tailLength = 5f + parameters.trail * 18f; val meteor = (1f - d / tailLength).coerceIn(0f, 1f); trail[x] = max(trail[x] * .72f, meteor * (f.onset + f.bass * .65f).coerceAtLeast(.18f)); setHsv(x, 195f + p * 42f, .95f, trail[x] * level) }
             Effect.BEAT_EXPLOSION -> setHsv(x, 5f + p * 280f, .92f, (f.onset * (1f - centered) + f.rms * wave * .45f).coerceIn(0f, 1f) * level)
             // Fire retains a cooling heat field; Embers only ignites sparse drifting sparks.
             Effect.FIRE -> setMix(x, 36, 0, 0, 255, 198, 18, fireHeat[x], level)
             Effect.EMBERS -> setMix(x, 0, 0, 0, 255, 92, 8, trail[x], level)
             Effect.FIREFLIES -> { val sparkle = pseudo(x, tick / 3) > .84f; setHsv(x, 52f + p * 38f, .72f, ((if (sparkle) .25f + f.onset else .025f) + f.rms * wave * .34f) * level) }
-            Effect.COLOR_WAVES -> setHsv(x, p * 360f + phase * 90f + f.treble * 80f, .90f, (f.rms * (.45f + wave * .55f)) * level)
+            Effect.COLOR_WAVES -> { val crest = ((sin(p * TWO_PI * 2.2f - phase * 2.4f) + 1f) * .5f); setHsv(x, 185f + crest * 115f + f.treble * 45f, .88f, (f.rms * .18f + crest * f.mid * .82f) * level) }
             Effect.THREE_BAND_RATIO -> { val v = when { x < width / 3 -> f.bass; x < width * 2 / 3 -> f.mid; else -> f.treble }; setHsv(x, if (x < width / 3) 0f else if (x < width * 2 / 3) 125f else 220f, .9f, (v * (.65f + wave * .35f)) * level) }
             Effect.DYNAMIC_HUE -> setHsv(x, f.bass * 20f + f.mid * 130f + f.treble * 240f + p * 90f + tick % 360, .95f, (f.rms * (.55f + wave * .45f)) * level)
             Effect.COLOR_ORGAN -> setHsv(x, if (band > .55f) 320f else 100f + x * 12f, .90f, (band * .8f + f.onset * .2f) * level)
@@ -482,7 +486,7 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
                 setHsv(x, 190f + p * 150f + phase * 85f, .92f, (centerRing + edgeRing * .72f + f.rms * .10f).coerceIn(0f, 1f) * level)
             }
             Effect.JUGGLE -> { val dot = ((sin(p * TWO_PI * 3f + phase * 4f) + 1f) * .5f); setHsv(x, p * 360f + phase * 100f, .9f, (dot * dot * (.25f + f.rms * .75f)) * level) }
-            Effect.PRISM -> setHsv(x, p * 360f + phase * 150f + f.treble * 100f, .95f, (f.mid * .45f + wave * .55f) * level)
+            Effect.PRISM -> { val facet = ((p * 7f + phase * 1.8f).toInt() % 7 + 7) % 7; setHsv(x, facet * (360f / 7f) + f.treble * 28f, .98f, (f.mid * .72f + f.onset * .28f) * level) }
             Effect.BASS_GRADIENT -> setHsv(x, 350f - p * 250f + parameters.hueShift, .92f, (f.bass * (1f - centered * .55f) + f.onset * .30f) * level)
             Effect.WAVE_BANDS -> { val v = (band * .62f + wave * f.rms * .38f).coerceIn(0f, 1f); setHsv(x, 175f + bandIndex * 11f + phase * 75f, .88f, v * level) }
             Effect.SCANNER -> { val position = ((sin(phase * 2.2f) + 1f) * .5f) * (width - 1); val d = abs(x - position); setHsv(x, 125f + p * 80f, .95f, ((1f - d / 3.5f).coerceIn(0f, 1f) * (f.rms + .25f)) * level) }
@@ -516,11 +520,11 @@ class EffectFrameRenderer(private val width: Int = HyperionFlatbuffer.AUDIO_WIDT
             Effect.NOISEMOVE -> { val n = pseudo((x + (phase * 8f).toInt()) % width, tick / 3); setHsv(x, 185f + n * 145f, .9f, (n * f.treble + f.rms * .12f) * level) }
             Effect.ROCKTAVES -> { val octave = f.bands[(bandIndex * 3 + (tick / 4).toInt()) % AudioFeatures.BAND_COUNT]; setHsv(x, 5f + p * 320f, .94f, (octave * (.5f + wave * .5f) + f.bass * .10f) * level) }
             Effect.OCEAN -> setMix(x, 0, 12, 70, 0, 225, 255, (f.mid * .6f + wave * .4f).coerceIn(0f, 1f), level)
-            Effect.AURORA -> setHsv(x, 265f + p * 80f + phase * 80f, .9f, (f.rms * .45f + wave * .55f) * level)
-            Effect.NEON -> setHsv(x, 285f + p * 105f + f.treble * 80f + phase * 130f, 1f, f.peak * (.45f + wave * .55f) * level)
+            Effect.AURORA -> { val curtain = ((sin(p * TWO_PI * 1.3f + phase) + sin(p * TWO_PI * 3.7f - phase * .6f) + 2f) * .25f); setHsv(x, 135f + curtain * 105f, .82f, (f.mid * curtain + f.rms * .12f) * level) }
+            Effect.NEON -> { val tube = if (((p * 12f + phase * 3f).toInt() and 1) == 0) 1f else .08f; setHsv(x, 300f + f.treble * 45f, 1f, tube * f.peak * level) }
             Effect.SUNSET -> setHsv(x, 350f + p * 50f, .9f, (f.rms * .55f + wave * .45f) * level)
             Effect.FOREST -> setMix(x, 0, 20, 8, 85, 255, 75, (f.bass * .7f + wave * .3f).coerceIn(0f, 1f), level)
-            Effect.RAINBOW -> setHsv(x, p * 360f + phase * 120f + f.treble * 90f, .9f, f.rms * (.6f + wave * .4f) * level)
+            Effect.RAINBOW -> { val hue = (p * 360f + phase * 45f + f.spectralCentroid * 50f); setHsv(x, hue, .96f, (f.rms * .72f + f.onset * .28f) * level) }
         }
     }
 

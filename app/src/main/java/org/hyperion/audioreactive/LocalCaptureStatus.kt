@@ -14,6 +14,10 @@ data class LocalCaptureStatus(
     val frameTimeMs: Float = 0f,
     val worstFrameTimeMs: Float = 0f,
     val missedFrameDeadlines: Long = 0,
+    /** Local-only bounded transition failure context; never contains endpoint or media data. */
+    val transitionTarget: String? = null,
+    val transitionError: String? = null,
+    val transitionOwnedState: String? = null,
 )
 object LocalStatusStore {
     @Volatile private var current = LocalCaptureStatus()
