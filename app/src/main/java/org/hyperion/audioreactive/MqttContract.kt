@@ -32,6 +32,12 @@ object MqttContract {
         val frameTimeMs: Float = 0f,
         val worstFrameTimeMs: Float = 0f,
         val missedFrameDeadlines: Long = 0,
+        val terminalCause: String? = null,
+        val terminalRequestedMode: String? = null,
+        val terminalCommittedMode: String? = null,
+        val terminalEpoch: Long? = null,
+        val terminalOwnedState: String? = null,
+        val terminalForegroundTypes: Int? = null,
     )
     sealed interface Command { data object On : Command; data object Off : Command; data class SetEffect(val value: String) : Command; data class SetSetting(val field: String, val value: String) : Command }
 
@@ -128,13 +134,13 @@ object MqttContract {
     }
     private fun settingDiscovery(field: String): String = if (field in numericSettings) numberDiscovery(field.replace('_', ' '), field, settingStateTopic(field), settingCommandTopic(field), numericSettings.getValue(field)) else selectDiscovery(field.replace('_', ' '), field, settingStateTopic(field), settingCommandTopic(field), settingOptions(field))
     private fun settingValue(settings: AudioSettings, field: String) = when (field) {
-        "effect" -> settings.effect.name; "brightness" -> settings.brightness.toString(); "sensitivity" -> settings.sensitivity.toString(); "fps" -> settings.fps.toString(); "output_mode" -> settings.outputMode.name; "render_mode" -> settings.renderMode.name; "video_quality" -> settings.videoQuality.name; "video_audio_silence_brightness_floor" -> settings.videoAudioSilenceBrightnessFloor.toString(); "silence_hold_millis" -> settings.silenceHoldMillis.toString(); "silence_fade_millis" -> settings.silenceFadeMillis.toString(); "audio_boost" -> settings.audioBoost.toString(); "wled_source_zones" -> settings.wledSourceZones.toString(); "video_effect" -> settings.videoEffect.name; "video_audio_effect" -> settings.videoAudioEffect.name; "video_saturation_percent" -> settings.videoSaturationPercent.toString(); "speed" -> settings.effectParameters.speed.toString(); "trail" -> settings.effectParameters.trail.toString(); "beat_threshold" -> settings.effectParameters.beatThreshold.toString(); else -> settings.effectParameters.hueShift.toString()
+        "effect" -> settings.effect.name; "brightness" -> settings.brightness.toString(); "sensitivity" -> settings.sensitivity.toString(); "fps" -> settings.fps.toString(); "output_mode" -> settings.outputMode.name; "render_mode" -> settings.renderMode.name; "video_quality" -> settings.videoQuality.name; "video_audio_silence_brightness_floor" -> settings.videoAudioSilenceBrightnessFloor.toString(); "silence_hold_millis" -> settings.silenceHoldMillis.toString(); "silence_fade_millis" -> settings.silenceFadeMillis.toString(); "audio_boost" -> settings.audioBoost.toString(); "wled_source_zones" -> settings.wledSourceZones.toString(); "video_effect" -> settings.videoEffect.name; "video_audio_effect" -> VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect).name; "video_saturation_percent" -> settings.videoSaturationPercent.toString(); "speed" -> settings.effectParameters.speed.toString(); "trail" -> settings.effectParameters.trail.toString(); "beat_threshold" -> settings.effectParameters.beatThreshold.toString(); else -> settings.effectParameters.hueShift.toString()
     }
     private fun settingsState(settings: AudioSettings) = jsonObject(
         "effect" to jsonString(settings.effect.name), "brightness" to settings.brightness.toString(), "sensitivity" to settings.sensitivity.toString(), "fps" to settings.fps.toString(),
         "output_mode" to jsonString(settings.outputMode.name), "render_mode" to jsonString(settings.renderMode.name), "video_quality" to jsonString(settings.videoQuality.name),
         "video_audio_silence_brightness_floor" to settings.videoAudioSilenceBrightnessFloor.toString(), "silence_hold_millis" to settings.silenceHoldMillis.toString(), "silence_fade_millis" to settings.silenceFadeMillis.toString(), "audio_boost" to settings.audioBoost.toString(), "wled_source_zones" to settings.wledSourceZones.toString(), "video_effect" to jsonString(settings.videoEffect.name),
-        "video_audio_effect" to jsonString(settings.videoAudioEffect.name), "video_saturation_percent" to settings.videoSaturationPercent.toString(),
+        "video_audio_effect" to jsonString(VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect).name), "video_saturation_percent" to settings.videoSaturationPercent.toString(),
         "effect_parameters" to jsonObject("speed" to settings.effectParameters.speed.toString(), "trail" to settings.effectParameters.trail.toString(), "beat_threshold" to settings.effectParameters.beatThreshold.toString(), "hue_shift" to settings.effectParameters.hueShift.toString()),
         "selected_wled_identities" to jsonArray(settings.selectedWledIdentities.sorted().map(::jsonString)), "selected_hyperion_identity" to (settings.selectedHyperionIdentity?.let(::jsonString) ?: "null"),
         "wled_calibrations" to jsonArray(settings.wledCalibrations.map(::calibrationJson)), "known_wled_identities" to jsonArray(settings.wledDevices.map { jsonString(it.identity) }), "known_hyperion_identities" to jsonArray(settings.hyperionDevices.map { jsonString(it.identity) }),
@@ -154,11 +160,17 @@ object MqttContract {
             "frame_time_ms" to runtime.frameTimeMs.coerceIn(0f, 10_000f).toString(),
             "worst_frame_time_ms" to runtime.worstFrameTimeMs.coerceIn(0f, 10_000f).toString(),
             "missed_frame_deadlines" to runtime.missedFrameDeadlines.coerceAtLeast(0L).toString(),
+            "terminal_cause" to (runtime.terminalCause?.let(::jsonString) ?: "null"),
+            "terminal_requested_mode" to (runtime.terminalRequestedMode?.let(::jsonString) ?: "null"),
+            "terminal_committed_mode" to (runtime.terminalCommittedMode?.let(::jsonString) ?: "null"),
+            "terminal_epoch" to (runtime.terminalEpoch?.coerceAtLeast(0L)?.toString() ?: "null"),
+            "terminal_owned_state" to (runtime.terminalOwnedState?.take(160)?.let(::jsonString) ?: "null"),
+            "terminal_foreground_types" to (runtime.terminalForegroundTypes?.coerceAtLeast(0)?.toString() ?: "null"),
             "render_mode" to jsonString(settings.renderMode.name),
             "output_mode" to jsonString(settings.outputMode.name),
             "effect" to jsonString(settings.effect.name),
             "video_effect" to jsonString(settings.videoEffect.name),
-            "video_audio_effect" to jsonString(settings.videoAudioEffect.name),
+            "video_audio_effect" to jsonString(VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect).name),
             "brightness" to settings.brightness.toString(),
             "sensitivity" to settings.sensitivity.toString(),
             "fps" to settings.fps.toString(),
@@ -203,7 +215,7 @@ object MqttContract {
 
     private data class NumericBounds(val min: String, val max: String, val step: String)
     private fun settingOptions(field: String): List<String> = when (field) {
-        "effect" -> Effect.entries.map { it.name }; "fps" -> VideoCapturePolicy.fpsOptions.map(Int::toString); "output_mode" -> OutputMode.entries.map { it.name }; "render_mode" -> RenderMode.entries.map { it.name }; "video_quality" -> VideoQuality.entries.map { it.name }; "video_effect" -> VideoEffect.entries.map { it.name }; "video_audio_effect" -> VideoAudioEffect.entries.map { it.name }; else -> emptyList()
+        "effect" -> Effect.entries.map { it.name }; "fps" -> VideoCapturePolicy.fpsOptions.map(Int::toString); "output_mode" -> OutputMode.entries.map { it.name }; "render_mode" -> RenderMode.entries.map { it.name }; "video_quality" -> VideoQuality.entries.map { it.name }; "video_effect" -> VideoEffect.entries.map { it.name }; "video_audio_effect" -> VideoAudioEffectCatalogue.visible.map { it.name }; else -> emptyList()
     }
     private val numericSettings = mapOf("brightness" to NumericBounds("0", "1", "0.05"), "sensitivity" to NumericBounds("0.25", "3.25", "0.05"), "video_audio_silence_brightness_floor" to NumericBounds("0", "1", "0.05"), "silence_hold_millis" to NumericBounds("0", "3000", "100"), "silence_fade_millis" to NumericBounds("100", "2000", "100"), "audio_boost" to NumericBounds("0", "0.75", "0.05"), "wled_source_zones" to NumericBounds("16", "512", "16"), "video_saturation_percent" to NumericBounds("0", "200", "1"), "speed" to NumericBounds("0.25", "3", "0.25"), "trail" to NumericBounds("0", "1", "0.1"), "beat_threshold" to NumericBounds("0.05", "0.95", "0.05"), "hue_shift" to NumericBounds("-180", "180", "15"))
     private val calibrationFields = listOf("start_pixel", "direction", "bottom", "right", "top", "left", "bottom_inset", "right_inset", "top_inset", "left_inset", "depth_percent", "samples_per_edge", "gamma", "brightness_limit")
@@ -232,7 +244,7 @@ object MqttSettingsPolicy {
             "audio_boost" -> settings.copy(audioBoost = number())
             "wled_source_zones" -> settings.copy(wledSourceZones = value.toIntOrNull() ?: error("zones"))
             "video_effect" -> settings.copy(videoEffect = enum(VideoEffect.entries))
-            "video_audio_effect" -> settings.copy(videoAudioEffect = enum(VideoAudioEffect.entries))
+            "video_audio_effect" -> settings.copy(videoAudioEffect = VideoAudioEffectCatalogue.fromPersistedName(value) ?: error("enum"))
             "video_audio_silence_brightness_floor" -> settings.copy(videoAudioSilenceBrightnessFloor = number())
             "silence_hold_millis" -> settings.copy(silenceHoldMillis = value.toIntOrNull() ?: error("hold"))
             "silence_fade_millis" -> settings.copy(silenceFadeMillis = value.toIntOrNull() ?: error("fade"))

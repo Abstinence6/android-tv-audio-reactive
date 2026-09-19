@@ -219,4 +219,24 @@ class CaptureServiceLifecycleTest {
         assertFalse(routerRetained)
         assertFalse(lifecycle.whileActive { })
     }
+
+    @Test fun intentionalProjectionReleaseAcknowledgesReentrantlyBeforeAnyLaterUnexpectedStopFailsClosed() {
+        val events = mutableListOf<String>()
+        val lifecycle = CaptureServiceLifecycle(cleanup = { events += "cleanup" })
+        assertTrue(lifecycle.beginStart { true })
+        assertTrue(lifecycle.activate { })
+        val released = Any()
+
+        assertTrue(lifecycle.releaseProjection(released) {
+            events += "release"
+            assertFalse(lifecycle.onProjectionStopped(released) { events += "unexpected"; lifecycle.stop() })
+            events += "acknowledged"
+        })
+        assertEquals(listOf("release", "acknowledged"), events)
+        assertTrue(lifecycle.whileActive { events += "ordinary-transition" })
+
+        assertTrue(lifecycle.onProjectionStopped(Any()) { events += "unexpected"; lifecycle.stop() })
+        assertEquals(listOf("release", "acknowledged", "ordinary-transition", "unexpected", "cleanup"), events)
+        assertFalse(lifecycle.whileActive { })
+    }
 }

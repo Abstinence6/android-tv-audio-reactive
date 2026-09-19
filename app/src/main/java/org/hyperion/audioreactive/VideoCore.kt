@@ -3,7 +3,6 @@ package org.hyperion.audioreactive
 import android.media.Image
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.sin
 
 /** Fixed-buffer RGBA ImageReader downsampler and video/audio compositor. */
 class VideoFrameProcessor(private val width: Int, private val height: Int) {
@@ -17,6 +16,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     private var cometHead = 0f
     private var rippleRadius = 0f
     private var bassSweepHead = 0f
+    private var lastSpatialTimestampNanos = 0L
     private var lastPulseTimestampNanos = 0L
     private val silenceBrightness = SilenceBrightnessController()
 
@@ -40,7 +40,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     fun compose(features: AudioFeatures?, settings: AudioSettings, timestampNanos: Long = System.nanoTime()): ByteArray {
         val hasAudioAccent = settings.renderMode == RenderMode.VIDEO_AUDIO && features?.signalPresent == true
         updateBeatPulse(features, settings, timestampNanos, hasAudioAccent)
-        if (hasAudioAccent) updateSpatialAccents(features!!, settings.videoAudioEffect)
+        if (hasAudioAccent) updateSpatialAccents(features!!, settings.videoAudioEffect, timestampNanos)
         var p = 0; var zone = 0
         while (p < video.size) {
             var r = video[p].toInt() and 255; var g = video[p + 1].toInt() and 255; var b = video[p + 2].toInt() and 255
@@ -92,6 +92,10 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         if (activeVideoAudioEffect != settings.videoAudioEffect) {
             activeVideoAudioEffect = settings.videoAudioEffect
             beatPulse = 0f
+            cometHead = 0f
+            rippleRadius = 0f
+            bassSweepHead = 0f
+            lastSpatialTimestampNanos = timestampNanos
             lastPulseTimestampNanos = timestampNanos
         }
         if (audioActive && !beatPulseAudioActive) {
@@ -126,11 +130,13 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     }
 
     /** Source hue/chroma is retained; effects differ by spatial placement and temporal state. */
-    private fun updateSpatialAccents(f: AudioFeatures, effect: VideoAudioEffect) {
+    private fun updateSpatialAccents(f: AudioFeatures, effect: VideoAudioEffect, timestampNanos: Long) {
+        val elapsedSeconds = ((timestampNanos - lastSpatialTimestampNanos).coerceIn(0L, MAX_SPATIAL_STEP_NANOS) / 1_000_000_000f)
+        lastSpatialTimestampNanos = timestampNanos.coerceAtLeast(lastSpatialTimestampNanos)
         when (VideoAudioEffectCatalogue.pickerEffect(effect)) {
-            VideoAudioEffect.COMET -> cometHead = (cometHead + .018f + f.onset * .22f + f.spectralCentroid * .035f) % 1f
-            VideoAudioEffect.RIPPLE -> rippleRadius = (rippleRadius + .025f + f.spectralFlux * .16f) % 1f
-            VideoAudioEffect.BASS_SWEEP -> bassSweepHead = (bassSweepHead + .012f + f.bass * .13f) % 1f
+            VideoAudioEffect.COMET -> cometHead = (cometHead + elapsedSeconds * (.18f + f.onset * 1.4f + f.spectralCentroid * .20f)) % 1f
+            VideoAudioEffect.RIPPLE -> rippleRadius = (rippleRadius + elapsedSeconds * (.22f + f.spectralFlux * 1.5f)) % 1f
+            VideoAudioEffect.BASS_SWEEP -> bassSweepHead = (bassSweepHead + elapsedSeconds * (.10f + f.bass * .90f)) % 1f
             else -> Unit
         }
     }
@@ -157,7 +163,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
     private fun videoAudioAccent(f: AudioFeatures, effect: VideoAudioEffect, zone: Int): IntArray {
         val phase = (zone * 37 + (f.spectralCentroid * 127f).toInt() + (f.spectralFlux * 71f).toInt()) and 255
         return when (VideoAudioEffectCatalogue.pickerEffect(effect)) {
-            VideoAudioEffect.BRIGHTNESS_PULSE -> intArrayOf(30, 120 + phase / 5, 255)
+            VideoAudioEffect.BRIGHTNESS_PULSE -> intArrayOf(30, 120 + (f.spectralCentroid * 80f).toInt(), 255)
             VideoAudioEffect.BEAT_PULSE -> intArrayOf(255, 28, 152)
             VideoAudioEffect.EQ -> intArrayOf(20 + phase / 3, 255, 72)
             VideoAudioEffect.COMET -> intArrayOf(255, 68, 20 + phase / 4)
@@ -178,6 +184,7 @@ class VideoFrameProcessor(private val width: Int, private val height: Int) {
         const val PULSE_STRENGTH_RANGE = .78f
         const val DEFAULT_PULSE_DECAY_MILLIS = 420f
         const val MAX_BEAT_EVENT_AGE_NANOS = 500_000_000L
+        const val MAX_SPATIAL_STEP_NANOS = 250_000_000L
         const val MAX_CHROMA_ACCENT = .28f
         const val MAX_BRIGHTNESS_ACCENT = .22f
         const val PERIMETER_ZONES = 16

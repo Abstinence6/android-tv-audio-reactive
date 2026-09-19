@@ -18,6 +18,13 @@ data class LocalCaptureStatus(
     val transitionTarget: String? = null,
     val transitionError: String? = null,
     val transitionOwnedState: String? = null,
+    /** Last terminal transition context, retained until the next capture begins. */
+    val terminalCause: String? = null,
+    val terminalRequestedMode: String? = null,
+    val terminalCommittedMode: String? = null,
+    val terminalEpoch: Long? = null,
+    val terminalOwnedState: String? = null,
+    val terminalForegroundTypes: Int? = null,
 )
 object LocalStatusStore {
     @Volatile private var current = LocalCaptureStatus()

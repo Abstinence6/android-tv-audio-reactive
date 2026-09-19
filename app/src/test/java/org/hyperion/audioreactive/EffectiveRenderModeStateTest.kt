@@ -23,7 +23,7 @@ class EffectiveRenderModeStateTest {
 
             assertTrue(LiveRendererSettings.commitRenderMode(RenderMode.VIDEO_AUDIO))
             assertTrue(LiveRendererSettings.setActiveEffect("EQ"))
-            assertEffective(RenderMode.VIDEO_AUDIO, persisted, "EQ", VideoAudioEffect.entries.map { it.name })
+            assertEffective(RenderMode.VIDEO_AUDIO, persisted, "EQ", VideoAudioEffectCatalogue.visible.map { it.name })
 
             // The admission snapshot is never rewritten by these renderer-local transitions.
             assertEquals(RenderMode.AUDIO, persisted.renderMode)

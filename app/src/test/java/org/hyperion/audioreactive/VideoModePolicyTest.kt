@@ -55,7 +55,7 @@ class VideoModePolicyTest {
         val mixed = base.copy(renderMode = RenderMode.VIDEO_AUDIO)
         assertEquals(Effect.FIRE.ordinal, EffectSelectorPolicy.selectedIndex(audio))
         assertEquals(VideoEffect.CONTRAST.ordinal, EffectSelectorPolicy.selectedIndex(video))
-        assertEquals(VideoAudioEffect.BASS_SWEEP.ordinal, EffectSelectorPolicy.selectedIndex(mixed))
+        assertEquals(VideoAudioEffectCatalogue.visible.indexOf(VideoAudioEffect.BASS_SWEEP), EffectSelectorPolicy.selectedIndex(mixed))
         listOf(audio, video, mixed).forEach { settings ->
             val names = EffectSelectorPolicy.names(settings)
             assertTrue(EffectSelectorPolicy.selectedIndex(settings) in names.indices)
@@ -80,7 +80,7 @@ class VideoModePolicyTest {
         assertEquals(VideoEffect.SATURATION, VideoColourTreatmentPolicy.selection(VideoEffect.SATURATION.ordinal))
         assertNull(VideoColourTreatmentPolicy.selection(VideoEffect.entries.size))
         assertTrue(VideoColourTreatmentPolicy.mutable(false)); assertTrue(VideoColourTreatmentPolicy.mutable(true))
-        assertEquals(VideoAudioEffect.entries.map { it.name }, EffectSelectorPolicy.names(mixed))
+        assertEquals(VideoAudioEffectCatalogue.visible.map { it.name }, EffectSelectorPolicy.names(mixed))
     }
 
     @Test fun videoPresetsAreDistinctTreatments() {
@@ -135,21 +135,22 @@ class VideoModePolicyTest {
         assertEquals(listOf(0, 3), sends)
     }
 
-    @Test fun videoAudioAppliesVideoSaturationAndOnlyAddsBrightnessModulation() {
+    @Test fun videoAudioAppliesVideoSaturationAndFeatureDrivenAccents() {
         val processor = processorWith(40, 80, 120)
         val features = AudioFeatures(.4f, .9f, .2f, .8f, .3f, .7f, FloatArray(16) { if (it == 0) .1f else .9f }, true)
         val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .5f)
         val saturationZero = processor.compose(null, base.copy(videoEffect = VideoEffect.SATURATION, videoSaturationPercent = 0)).copyOf()
         val saturationFull = processor.compose(null, base.copy(videoEffect = VideoEffect.SATURATION, videoSaturationPercent = 100)).copyOf()
-        val brightness = processor.compose(features, base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE)).copyOf()
+        processor.compose(beat(0L, 1_000_000_000L), base.copy(videoAudioEffect = VideoAudioEffect.BEAT_PULSE), 1_000_000_000L)
+        val beat = processor.compose(beat(1L, 1_100_000_000L), base.copy(videoAudioEffect = VideoAudioEffect.BEAT_PULSE), 1_100_000_000L).copyOf()
         val eq = processor.compose(features, base.copy(videoAudioEffect = VideoAudioEffect.EQ)).copyOf()
         assertArrayEquals(byteArrayOf(80, 80, 80), saturationZero)
         assertArrayEquals(byteArrayOf(40, 80, 120), saturationFull)
         val silence = processor.compose(null, base.copy(videoEffect = VideoEffect.SATURATION, videoSaturationPercent = 100)).copyOf()
-        assertFalse(brightness.contentEquals(eq))
+        assertFalse(beat.contentEquals(eq))
         // Chroma accents intentionally may lower an individual source channel while preserving bounded RGB.
-        brightness.forEach { assertTrue((it.toInt() and 255) in 0..255) }
-        assertFalse(brightness.contentEquals(silence))
+        beat.forEach { assertTrue((it.toInt() and 255) in 0..255) }
+        assertFalse(beat.contentEquals(silence))
     }
 
     @Test fun everyVideoAudioAccentIsBoundedAndPreservesSourceRgbDirection() {
@@ -188,10 +189,6 @@ class VideoModePolicyTest {
             p.compose(onset, base.copy(videoAudioEffect = effect), 1_100_000_000L).toList()
         }
         assertEquals(VideoAudioEffectCatalogue.visible.size, outputs.distinct().size)
-        val lowSpectrum = AudioFeatures(.6f, .6f, .15f, .2f, .4f, .9f, FloatArray(16) { if (it == 13) 1f else .05f }, true, 1L, .8f, 1_000_000_000L, 120f, 1f, -.5f, .05f, .1f)
-        val lowCentroid = processor().compose(lowSpectrum, base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE), 1_200_000_000L)
-        val highCentroid = processor().compose(spectral, base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE), 1_200_000_000L)
-        assertFalse(lowCentroid.contentEquals(highCentroid))
     }
 
     @Test fun compactVideoAudioZeroEnergyIsSafeAndLeavesVideoUnaccented() {
@@ -281,7 +278,7 @@ class VideoModePolicyTest {
     @Test fun switchingIntoBeatPulseBaselinesRetainedBeatUntilTheNextSequence() {
         val processor = processorWith(100, 50, 25)
         val base = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, brightness = 1f, audioBoost = .5f)
-        val otherEffect = base.copy(videoAudioEffect = VideoAudioEffect.BRIGHTNESS_PULSE)
+        val otherEffect = base.copy(videoAudioEffect = VideoAudioEffect.COMET)
         val beatPulse = base.copy(videoAudioEffect = VideoAudioEffect.BEAT_PULSE)
         val retained = AudioFeatures(.8f, .9f, .8f, .8f, .3f, .2f, FloatArray(16) { .5f }, true, 7L, 1f, 1_000_000_000L, 120f, 1f)
         processor.compose(retained, otherEffect, 1_000_000_000L)

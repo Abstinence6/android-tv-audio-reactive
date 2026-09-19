@@ -16,14 +16,14 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("private val lifecycle = CaptureServiceLifecycle(::performTeardown)"))
         assertTrue(source.contains("OutputDiagnosticAdmission.reserveCapture()"))
         assertTrue(source.contains("else if(admission.reserve(ids)) true"))
-        assertTrue(source.contains("if(!lifecycle.whileStarting { channel(); startForeground"))
+        assertTrue(source.contains("if(!lifecycle.whileStarting { channel(); foregroundTypesRequested=foregroundTypes; startForeground"))
     }
 
     @Test fun invalidProjectionAndRouteAdmissionsUseOneTerminalTeardownPath() {
         assertTrue(source.contains("if(!animation && (intent?.getIntExtra(EXTRA_RESULT_CODE,0)!=Activity.RESULT_OK||data==null)){rejectInvalidStart(generation);return START_NOT_STICKY}"))
         assertTrue(source.contains("if(animation != frozen.isNoInputAnimation()){rejectInvalidStart(generation);return START_NOT_STICKY}"))
         assertTrue(source.contains("if(!valid){rejectInvalidStart(generation);return START_NOT_STICKY}"))
-        assertTrue(source.contains("private fun rejectInvalidStart(generation:Long){invalidAdmissionGeneration=generation;lifecycle.stop()}"))
+        assertTrue(source.contains("private fun rejectInvalidStart(generation:Long){invalidAdmissionGeneration=generation;terminalStop(TerminalCause.EXPLICIT_STOP)}"))
         assertTrue(source.contains("invalidAdmissionGeneration?.let{generation->invalidAdmissionGeneration=null;broadcastAdmissionFailed(generation)}?:broadcast()"))
     }
 
@@ -54,7 +54,24 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("if(!s.requiresVideo()&&reader!=null) releaseVideo()"))
         assertTrue(source.contains("lifecycle.whileActive"))
         assertTrue(source.contains("frozen.requiresAudio()&&frozen.audioInput == AudioInput.MICROPHONE"))
-        assertTrue(source.contains("startForeground(ID,notification(),ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)}"))
+        assertTrue(source.contains("foregroundTypesRequested=ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;startForeground(ID,notification(),foregroundTypesRequested)}"))
+    }
+
+    @Test fun microphoneReconciliationUpdatesForegroundDiagnosticBeforeRequestingTheType() {
+        assertTrue(source.contains("if(s.audioInput==AudioInput.MICROPHONE) { foregroundTypesRequested=ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE; startForeground(ID,notification(),foregroundTypesRequested) }"))
+    }
+
+    @Test fun everyServiceTerminalPathCapturesAnExplicitBoundedCauseBeforeLifecycleStop() {
+        assertTrue(source.contains("terminalStop(TerminalCause.TRANSITION_EXCEPTION)"))
+        assertTrue(source.contains("terminalStop(TerminalCause.UNEXPECTED_PROJECTION_REVOKE)"))
+        assertTrue(source.contains("terminalStop(TerminalCause.ROUTE_LOST)"))
+        assertTrue(source.contains("terminalStop(TerminalCause.MICROPHONE_LOSS)"))
+        assertTrue(source.contains("terminalStop(TerminalCause.EXPLICIT_STOP)"))
+        assertTrue(source.contains("override fun onDestroy(){terminalStop(TerminalCause.DESTROY)"))
+        val terminalStop = source.indexOf("private fun terminalStop(cause:TerminalCause")
+        val capture = source.indexOf("TerminalDiagnostics.capture(cause,requestedRender,committedRender,transitionEpoch", terminalStop)
+        val lifecycleStop = source.indexOf("lifecycle.stop", terminalStop)
+        assertTrue(terminalStop >= 0 && capture > terminalStop && lifecycleStop > terminalStop)
     }
 
     @Test fun animationBranchSendsBeforeAnyProjectionLookup() {

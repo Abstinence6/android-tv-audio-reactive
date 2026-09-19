@@ -39,4 +39,32 @@ class LiveTransitionCoordinatorTest {
         assertEquals("projection=true,audio=true,video=false,fgs=mediaProjection|microphone", status.transitionOwnedState)
         assertFalse(status.transitionError!!.contains("secret"))
     }
+
+    @Test fun terminalDiagnosticCapturesFirstCauseAndTransitionOwnershipWithoutSecrets() {
+        LocalStatusStore.reset(CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO)
+        TerminalDiagnostics.capture(
+            TerminalCause.UNEXPECTED_PROJECTION_REVOKE,
+            requested = RenderMode.VIDEO,
+            committed = RenderMode.VIDEO_AUDIO,
+            epoch = 42,
+            owned = TransitionDiagnostics.OwnedState(true, true, true, "mediaProjection|microphone"),
+            foregroundTypes = 96,
+        )
+        TerminalDiagnostics.capture(
+            TerminalCause.EXPLICIT_STOP,
+            requested = RenderMode.AUDIO,
+            committed = RenderMode.AUDIO,
+            epoch = 43,
+            owned = TransitionDiagnostics.OwnedState(false, false, false, "dataSync"),
+            foregroundTypes = 1,
+        )
+
+        val status = LocalStatusStore.snapshot()
+        assertEquals("unexpected_projection_revoke", status.terminalCause)
+        assertEquals("VIDEO", status.terminalRequestedMode)
+        assertEquals("VIDEO_AUDIO", status.terminalCommittedMode)
+        assertEquals(42L, status.terminalEpoch)
+        assertEquals("projection=true,audio=true,video=true,fgs=mediaProjection|microphone", status.terminalOwnedState)
+        assertEquals(96, status.terminalForegroundTypes)
+    }
 }

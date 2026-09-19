@@ -66,6 +66,31 @@ class MqttContractTest {
         assertFalse(attributes.contains("realtimePort"))
     }
 
+    @Test fun diagnosticAttributesExposeBoundedTerminalTransitionContext() {
+        val runtime = MqttContract.DiagnosticRuntime(
+            captureActive = false,
+            captureStatus = "ROUTE_LOST",
+            detail = "route_lost",
+            terminalCause = "route_lost",
+            terminalRequestedMode = "VIDEO_AUDIO",
+            terminalCommittedMode = "VIDEO",
+            terminalEpoch = 7,
+            terminalOwnedState = "projection=true,audio=false,video=true,fgs=mediaProjection",
+            terminalForegroundTypes = 32,
+        )
+        val attributes = MqttContract.snapshot(AudioSettings.defaults(), runtime)
+            .first { it.topic == MqttContract.DIAGNOSTIC_ATTRIBUTES }.payload
+
+        listOf(
+            "\"terminal_cause\":\"route_lost\"",
+            "\"terminal_requested_mode\":\"VIDEO_AUDIO\"",
+            "\"terminal_committed_mode\":\"VIDEO\"",
+            "\"terminal_epoch\":7",
+            "\"terminal_foreground_types\":32",
+        ).forEach { assertTrue("Missing $it", attributes.contains(it)) }
+        assertFalse(attributes.contains("token"))
+    }
+
     @Test fun onNeverRequestsConsentOrStartsCaptureAndOffOnlyStopsOwnedCapture() {
         assertEquals(MqttCommandPolicy.Action.ReportConsentRequired, MqttCommandPolicy.decide(MqttContract.Command.On, false))
         assertEquals(MqttCommandPolicy.Action.ReportConsentRequired, MqttCommandPolicy.decide(MqttContract.Command.On, true))
@@ -128,19 +153,28 @@ class MqttContractTest {
         }
     }
 
-    @Test fun everyOriginalVideoAudioTokenParsesActivatesAndRemainsAdvertisedWhilePickerStaysCompact() {
-        assertEquals(6, VideoAudioEffectCatalogue.visible.size)
+    @Test fun everyOriginalVideoAudioTokenParsesAndMapsToTheVisibleNonGlobalCatalogue() {
+        assertEquals(5, VideoAudioEffectCatalogue.visible.size)
+        assertFalse(VideoAudioEffect.BRIGHTNESS_PULSE in VideoAudioEffectCatalogue.visible)
         VideoAudioEffect.entries.forEach { legacy ->
             val settings = AudioSettings.defaults().copy(renderMode = RenderMode.VIDEO_AUDIO, videoAudioEffect = legacy)
-            assertEquals(legacy, VideoAudioEffectCatalogue.fromPersistedName(legacy.name))
-            assertEquals(settings, EffectSelectorPolicy.withActiveName(settings, legacy.name))
+            val canonical = VideoAudioEffectCatalogue.pickerEffect(legacy)
+            assertEquals(canonical, VideoAudioEffectCatalogue.fromPersistedName(legacy.name))
+            assertEquals(settings.copy(videoAudioEffect = canonical), EffectSelectorPolicy.withActiveName(settings, legacy.name))
             assertEquals(MqttContract.Command.SetEffect(legacy.name), MqttContract.parseCommand(MqttContract.EFFECT_COMMAND, legacy.name, false))
-            assertEquals(legacy, MqttSettingsPolicy.apply(settings, MqttContract.Command.SetSetting("video_audio_effect", legacy.name))?.videoAudioEffect)
-            val discovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.EFFECT_DISCOVERY }.payload
-            val settingDiscovery = MqttContract.snapshot(settings, false, "idle").first { it.topic == MqttContract.settingDiscoveryTopic("video_audio_effect") }.payload
-            assertTrue("HA active options omit ${legacy.name}", discovery.contains("\"${legacy.name}\""))
-            assertTrue("HA settings options omit ${legacy.name}", settingDiscovery.contains("\"${legacy.name}\""))
-            assertTrue(VideoAudioEffectCatalogue.pickerEffect(legacy) in VideoAudioEffectCatalogue.visible)
+            assertEquals(canonical, MqttSettingsPolicy.apply(settings, MqttContract.Command.SetSetting("video_audio_effect", legacy.name))?.videoAudioEffect)
+            val snapshot = MqttContract.snapshot(settings, false, "idle")
+            val discovery = snapshot.first { it.topic == MqttContract.EFFECT_DISCOVERY }.payload
+            val settingDiscovery = snapshot.first { it.topic == MqttContract.settingDiscoveryTopic("video_audio_effect") }.payload
+            assertEquals(canonical.name, snapshot.first { it.topic == MqttContract.EFFECT_STATE }.payload)
+            assertEquals(canonical.name, snapshot.first { it.topic == MqttContract.settingStateTopic("video_audio_effect") }.payload)
+            VideoAudioEffectCatalogue.visible.forEach { visible ->
+                assertTrue("HA active options omit ${visible.name}", discovery.contains("\"${visible.name}\""))
+                assertTrue("HA settings options omit ${visible.name}", settingDiscovery.contains("\"${visible.name}\""))
+            }
+            assertFalse(discovery.contains("\"BRIGHTNESS_PULSE\""))
+            assertFalse(settingDiscovery.contains("\"BRIGHTNESS_PULSE\""))
+            assertTrue(canonical in VideoAudioEffectCatalogue.visible)
         }
     }
 

@@ -13,23 +13,25 @@ enum class VideoAudioEffect {
     SILENCE_BREATHING, ADAPTIVE_SHIMMER, BEAT_COLOUR_TEMPERATURE
 }
 
-/** TV exposes differentiated families while persistence, MQTT and HA retain every historic token. */
+/** TV exposes differentiated families while persistence and MQTT accept every historic token. */
 object VideoAudioEffectCatalogue {
     val visible = listOf(
-        VideoAudioEffect.BRIGHTNESS_PULSE, VideoAudioEffect.BEAT_PULSE, VideoAudioEffect.EQ,
+        VideoAudioEffect.BEAT_PULSE, VideoAudioEffect.EQ,
         VideoAudioEffect.COMET, VideoAudioEffect.RIPPLE, VideoAudioEffect.BASS_SWEEP,
     )
     fun pickerEffect(effect: VideoAudioEffect): VideoAudioEffect = when (effect) {
+        VideoAudioEffect.BRIGHTNESS_PULSE -> VideoAudioEffect.BEAT_PULSE
         VideoAudioEffect.SPECTRAL_BANDS, VideoAudioEffect.FREQUENCY_GRADIENT -> VideoAudioEffect.EQ
         VideoAudioEffect.CENTER_BEAT_BURST, VideoAudioEffect.BEAT_STROBE, VideoAudioEffect.BEAT_COLOUR_TEMPERATURE -> VideoAudioEffect.BEAT_PULSE
-        VideoAudioEffect.EDGE_PULSE, VideoAudioEffect.VOCAL_FOCUS, VideoAudioEffect.SILENCE_BREATHING -> VideoAudioEffect.BRIGHTNESS_PULSE
+        VideoAudioEffect.EDGE_PULSE, VideoAudioEffect.VOCAL_FOCUS, VideoAudioEffect.SILENCE_BREATHING -> VideoAudioEffect.BEAT_PULSE
         VideoAudioEffect.STEREO_BALANCE, VideoAudioEffect.BASS_WAVE -> VideoAudioEffect.BASS_SWEEP
         VideoAudioEffect.COMET_TRAILS -> VideoAudioEffect.COMET
         VideoAudioEffect.ADAPTIVE_SHIMMER -> VideoAudioEffect.RIPPLE
         else -> effect
     }
     /** SharedPreferences and MQTT persist enum names, never localized picker labels. */
-    fun fromPersistedName(name: String?): VideoAudioEffect? = VideoAudioEffect.entries.firstOrNull { it.name == name }
+    fun fromPersistedName(name: String?): VideoAudioEffect? =
+        VideoAudioEffect.entries.firstOrNull { it.name == name }?.let(::pickerEffect)
 }
 
 /** Effects that intentionally need neither playback audio nor screen capture. */
@@ -78,14 +80,14 @@ object EffectSelectorPolicy {
     fun names(settings: AudioSettings): List<String> = when (settings.renderMode) {
         RenderMode.AUDIO -> Effect.entries.map { it.name }
         RenderMode.VIDEO -> VideoEffect.entries.map { it.name }
-        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.map { it.name }
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.visible.map { it.name }
         RenderMode.ANIMATION -> AnimationEffect.entries.map { it.name }
     }
 
     fun activeName(settings: AudioSettings): String = when (settings.renderMode) {
         RenderMode.AUDIO -> settings.effect.name
         RenderMode.VIDEO -> settings.videoEffect.name
-        RenderMode.VIDEO_AUDIO -> settings.videoAudioEffect.name
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect).name
         RenderMode.ANIMATION -> settings.animationEffect.name
     }
 
@@ -93,7 +95,7 @@ object EffectSelectorPolicy {
     fun withActiveName(settings: AudioSettings, name: String): AudioSettings? = when (settings.renderMode) {
         RenderMode.AUDIO -> Effect.entries.firstOrNull { it.name == name }?.let { settings.copy(effect = it) }
         RenderMode.VIDEO -> VideoEffect.entries.firstOrNull { it.name == name }?.let { settings.copy(videoEffect = it) }
-        RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.firstOrNull { it.name == name }?.let { settings.copy(videoAudioEffect = it) }
+        RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.fromPersistedName(name)?.let { settings.copy(videoAudioEffect = it) }
         RenderMode.ANIMATION -> AnimationEffect.entries.firstOrNull { it.name == name }?.let { settings.copy(animationEffect = it) }
     }
 }
@@ -128,7 +130,7 @@ object LiveRendererSettings {
     @Synchronized fun end() { active = false; admitted = null; effect = null; videoEffect = null; videoAudioEffect = null; animationEffect = null; animationColour = null; parameters = null; brightness = null; sensitivity = null; videoSaturationPercent = null; renderMode = null; videoAudioSilenceBrightnessFloor = null; silenceHoldMillis = null; silenceFadeMillis = null; silenceFadeEnabled = null }
     @Synchronized fun setEffect(value: Effect) { if (active) effect = value }
     @Synchronized fun setVideoEffect(value: VideoEffect) { if (active) videoEffect = value }
-    @Synchronized fun setVideoAudioEffect(value: VideoAudioEffect) { if (active) videoAudioEffect = value }
+    @Synchronized fun setVideoAudioEffect(value: VideoAudioEffect) { if (active) videoAudioEffect = VideoAudioEffectCatalogue.pickerEffect(value) }
     @Synchronized fun setAnimationEffect(value: AnimationEffect) { if (active) animationEffect = value }
     @Synchronized fun setAnimationColour(value: AnimationColour) { if (active) animationColour = value }
     @Synchronized fun setActiveEffect(name: String): Boolean {
@@ -136,7 +138,7 @@ object LiveRendererSettings {
         return when (current) {
             RenderMode.AUDIO -> Effect.entries.firstOrNull { it.name == name }?.let { effect = it } != null
             RenderMode.VIDEO -> VideoEffect.entries.firstOrNull { it.name == name }?.let { videoEffect = it } != null
-            RenderMode.VIDEO_AUDIO -> VideoAudioEffect.entries.firstOrNull { it.name == name }?.let { videoAudioEffect = it } != null
+            RenderMode.VIDEO_AUDIO -> VideoAudioEffectCatalogue.fromPersistedName(name)?.let { videoAudioEffect = it } != null
             RenderMode.ANIMATION -> AnimationEffect.entries.firstOrNull { it.name == name }?.let { animationEffect = it } != null
         }
     }
@@ -166,7 +168,7 @@ object LiveRendererSettings {
         return settings.copy(
         effect = effect ?: settings.effect,
         videoEffect = videoEffect ?: settings.videoEffect,
-        videoAudioEffect = videoAudioEffect ?: settings.videoAudioEffect,
+        videoAudioEffect = videoAudioEffect ?: VideoAudioEffectCatalogue.pickerEffect(settings.videoAudioEffect),
         animationEffect = animationEffect ?: settings.animationEffect,
         animationColour = animationColour ?: settings.animationColour,
         effectParameters = parameters ?: settings.effectParameters,

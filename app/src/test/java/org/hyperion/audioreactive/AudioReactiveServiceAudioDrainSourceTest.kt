@@ -29,6 +29,6 @@ class AudioReactiveServiceAudioDrainSourceTest {
         assertTrue(source.contains("registerAudioDeviceCallback(voiceInputDeviceCallback,null)"))
         assertTrue(source.contains("unregisterAudioDeviceCallback(voiceInputDeviceCallback)"))
         assertTrue(source.contains("removeOnRoutingChangedListener(voiceInputRouteListener)"))
-        assertTrue(source.contains("private fun terminateVoiceInputLost(){ lifecycle.stop { status=CaptureStatus.MICROPHONE_ROUTE_LOST"))
+        assertTrue(source.contains("private fun terminateVoiceInputLost(){ terminalStop(TerminalCause.MICROPHONE_LOSS) { status=CaptureStatus.MICROPHONE_ROUTE_LOST"))
     }
 }

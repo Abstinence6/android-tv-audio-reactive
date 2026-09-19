@@ -15,7 +15,7 @@ class ApprovedFeatureBatchTest {
 
     @Test fun catalogsAreExactAndSeparatedByCaptureMode() {
         assertEquals(listOf("NORMAL", "SATURATION", "CONTRAST"), VideoEffect.entries.map { it.name })
-        assertEquals(listOf("BRIGHTNESS_PULSE", "BEAT_PULSE", "EQ", "COMET", "RIPPLE", "BASS_SWEEP"), VideoAudioEffectCatalogue.visible.map { it.name })
+        assertEquals(listOf("BEAT_PULSE", "EQ", "COMET", "RIPPLE", "BASS_SWEEP"), VideoAudioEffectCatalogue.visible.map { it.name })
         assertTrue(VideoEffectCatalog.compatible(RenderMode.VIDEO, "NORMAL"))
         assertFalse(VideoEffectCatalog.compatible(RenderMode.VIDEO, "SPECTRUM"))
     }

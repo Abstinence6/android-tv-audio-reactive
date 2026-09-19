@@ -15,6 +15,40 @@ internal object TransitionDiagnostics {
     }
 }
 
+internal enum class TerminalCause {
+    TRANSITION_EXCEPTION,
+    UNEXPECTED_PROJECTION_REVOKE,
+    ROUTE_LOST,
+    MICROPHONE_LOSS,
+    EXPLICIT_STOP,
+    DESTROY;
+
+    val wireName get() = name.lowercase()
+}
+
+/** First terminal event wins so re-entrant teardown cannot obscure the initiating failure. */
+internal object TerminalDiagnostics {
+    fun capture(
+        cause: TerminalCause,
+        requested: RenderMode?,
+        committed: RenderMode?,
+        epoch: Long?,
+        owned: TransitionDiagnostics.OwnedState,
+        foregroundTypes: Int,
+    ) {
+        val status = LocalStatusStore.snapshot()
+        if (status.terminalCause != null) return
+        LocalStatusStore.update(status.copy(
+            terminalCause = cause.wireName,
+            terminalRequestedMode = requested?.name,
+            terminalCommittedMode = committed?.name,
+            terminalEpoch = epoch,
+            terminalOwnedState = owned.toString().take(160),
+            terminalForegroundTypes = foregroundTypes.coerceAtLeast(0),
+        ))
+    }
+}
+
 /** The ordering contract used by the service before source acquisition. */
 internal object LiveTransitionCoordinator {
     fun execute(target: RenderMode, setForegroundTypes: () -> Unit, acquireNeededSources: () -> Unit, commit: () -> Unit) {

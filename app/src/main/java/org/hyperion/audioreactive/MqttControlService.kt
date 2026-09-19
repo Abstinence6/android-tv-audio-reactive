@@ -142,6 +142,12 @@ class MqttControlService : Service(), MqttCallbackExtended {
             frameTimeMs = local.frameTimeMs,
             worstFrameTimeMs = local.worstFrameTimeMs,
             missedFrameDeadlines = local.missedFrameDeadlines,
+            terminalCause = local.terminalCause,
+            terminalRequestedMode = local.terminalRequestedMode,
+            terminalCommittedMode = local.terminalCommittedMode,
+            terminalEpoch = local.terminalEpoch,
+            terminalOwnedState = local.terminalOwnedState,
+            terminalForegroundTypes = local.terminalForegroundTypes,
         )
         val effective = EffectiveRenderSettings.snapshot(RuntimeSettings.snapshot(), runtime.captureActive)
         MqttContract.snapshot(effective, runtime).forEach { p ->
