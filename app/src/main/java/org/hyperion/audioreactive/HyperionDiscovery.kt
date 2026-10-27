@@ -44,7 +44,7 @@ object HyperionDiscovery {
      * previously verified appliance, matching the app network-security policy. A new endpoint
      * requires a reviewed update rather than a LAN-wide cleartext exception.
      */
-    private const val TRUSTED_HYPERION_HOST = "192.168.1.158"
+    private const val TRUSTED_HYPERION_HOST = "192.168.0.158"
     fun isPermittedHost(host: String): Boolean = host == TRUSTED_HYPERION_HOST
 
     /**

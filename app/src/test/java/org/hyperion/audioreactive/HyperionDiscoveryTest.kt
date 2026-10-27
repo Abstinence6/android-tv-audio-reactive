@@ -8,12 +8,12 @@ class HyperionDiscoveryTest {
     private val response = """{"success":true,"info":{"uuid":"$uuid","hostname":"TV Hyperion"}}"""
 
     @Test fun parserRequiresServerUuidAndExactTrustedHost() {
-        val device = HyperionDiscovery.parseServerInfo("192.168.1.158", response)!!
+        val device = HyperionDiscovery.parseServerInfo("192.168.0.158", response)!!
         assertEquals("uuid:$uuid", device.identity)
-        assertEquals("192.168.1.158", device.host)
+        assertEquals("192.168.0.158", device.host)
         assertNull(HyperionDiscovery.parseServerInfo("192.168.2.25", response))
         assertNull(HyperionDiscovery.parseServerInfo("192.168.1.25", response))
-        assertNull(HyperionDiscovery.parseServerInfo("192.168.1.158", "{\"hostname\":\"mutable name\",\"id\":1}"))
+        assertNull(HyperionDiscovery.parseServerInfo("192.168.0.158", "{\"hostname\":\"mutable name\",\"id\":1}"))
         assertFalse(HyperionDiscovery.isPermittedHost("192.168.1.0"))
         assertFalse(HyperionDiscovery.isPermittedHost("10.0.0.1"))
     }
@@ -21,18 +21,18 @@ class HyperionDiscoveryTest {
     @Test fun parserFallsBackOnlyToImmutableSysInfoHyperionId() {
         val serverInfoWithoutUuid = """{"success":true,"info":{"hostname":"TV Hyperion","instance":[{"instance":0}]}}"""
         val sysInfo = """{"success":true,"info":{"hyperion":{"id":"$uuid","version":"2.0.17"}}}"""
-        val device = HyperionDiscovery.parseServerInfo("192.168.1.158", serverInfoWithoutUuid, sysInfo)!!
+        val device = HyperionDiscovery.parseServerInfo("192.168.0.158", serverInfoWithoutUuid, sysInfo)!!
         assertEquals("uuid:$uuid", device.identity)
         assertEquals("TV Hyperion", device.name)
-        assertNull(HyperionDiscovery.parseServerInfo("192.168.1.158", serverInfoWithoutUuid, """{"info":{"id":"$uuid"}}"""))
-        assertNull(HyperionDiscovery.parseServerInfo("192.168.1.158", serverInfoWithoutUuid, """{"info":{"other":{"hyperion":{"id":"$uuid"}},"hyperion":{"version":"2.0.17"}}}"""))
+        assertNull(HyperionDiscovery.parseServerInfo("192.168.0.158", serverInfoWithoutUuid, """{"info":{"id":"$uuid"}}"""))
+        assertNull(HyperionDiscovery.parseServerInfo("192.168.0.158", serverInfoWithoutUuid, """{"info":{"other":{"hyperion":{"id":"$uuid"}},"hyperion":{"version":"2.0.17"}}}"""))
         assertNull(HyperionDiscovery.parseServerInfo("192.168.1.25", serverInfoWithoutUuid, sysInfo))
     }
 
     @Test fun validationSkipsSysInfoWhenServerInfoAlreadyHasUuid() {
         var sysInfoRequests = 0
         val device = HyperionDiscovery.validate(
-            "192.168.1.158",
+            "192.168.0.158",
             requestServerInfo = { response },
             requestSysInfo = { sysInfoRequests++; error("sysinfo must not be requested") },
             verifyDataPort = { true },
@@ -42,9 +42,9 @@ class HyperionDiscoveryTest {
     }
 
     @Test fun inventoryRetainsStaleSelectionAndUpdatesHostForSameIdentity() {
-        val old = HyperionDevice("uuid:$uuid", "Old", "192.168.1.158")
+        val old = HyperionDevice("uuid:$uuid", "Old", "192.168.0.158")
         val fresh = old.copy(name = "New")
-        val other = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174001", "Other", "192.168.1.158")
+        val other = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174001", "Other", "192.168.0.158")
         val before = AudioSettings.defaults().copy(hyperionDevices = listOf(old), selectedHyperionIdentity = old.identity)
         val stale = before.copy(hyperionDevices = HyperionInventory.merge(before.hyperionDevices, listOf(other)))
         assertEquals(listOf(old, other), stale.hyperionDevices); assertEquals(old.identity, stale.selectedHyperionIdentity)
@@ -52,7 +52,7 @@ class HyperionDiscoveryTest {
     }
 
     @Test fun bindingRejectsZeroOrChangedAndIsOneShot() {
-        val selected = HyperionDevice("uuid:$uuid", "TV", "192.168.1.158")
+        val selected = HyperionDevice("uuid:$uuid", "TV", "192.168.0.158")
         val settings = AudioSettings.defaults().copy(hyperionDevices = listOf(selected), selectedHyperionIdentity = selected.identity)
         assertNull(HyperionCapturePreflight.bind(settings) { emptyList() })
         assertNull(HyperionCapturePreflight.bind(settings) { listOf(selected.copy(host = "192.168.1.157")) })

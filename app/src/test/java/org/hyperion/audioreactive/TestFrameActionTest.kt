@@ -9,7 +9,7 @@ import org.junit.Test
 
 class TestFrameActionTest {
     private val wled = WledDevice("mac:AABBCCDDEEFF", "Desk", "192.168.1.152", 30, 21324)
-    private val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "Desk", "192.168.1.158", 19444, 19400)
+    private val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "Desk", "192.168.0.158", 19444, 19400)
 
     @Test fun wledTestRequiresFreshPreflightAndConsumesItsBindingOnce() {
         val settings = AudioSettings.defaults().copy(outputMode = OutputMode.WLED, wledDevices = listOf(wled), selectedWledIdentities = setOf(wled.identity), wledCalibrations = listOf(WledScreenCalibration.proportional(wled.identity, wled.leds)))

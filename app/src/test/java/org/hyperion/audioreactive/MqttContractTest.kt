@@ -48,7 +48,7 @@ class MqttContractTest {
 
     @Test fun diagnosticAttributesContainCurrentSettingsRuntimeAndSafeSelectedOutputs() {
         val wled = WledDevice("mac:AABBCCDDEEFF", "TV strip", "192.168.1.152", 32, 21324)
-        val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "TV Hyperion", "192.168.1.158")
+        val hyperion = HyperionDevice("uuid:123e4567-e89b-12d3-a456-426614174000", "TV Hyperion", "192.168.0.158")
         val settings = AudioSettings.defaults().copy(
             effect = Effect.FIRE, brightness = .8f, sensitivity = 1.5f, fps = 24,
             outputMode = OutputMode.WLED, renderMode = RenderMode.VIDEO_AUDIO, videoQuality = VideoQuality.HIGH,
@@ -62,7 +62,7 @@ class MqttContractTest {
         val attributes = MqttContract.snapshot(settings, runtime).first { it.topic == MqttContract.DIAGNOSTIC_ATTRIBUTES }.payload
         listOf("\"capture_active\":true", "\"capture_status\":\"CAPTURE_ACTIVE_VIDEO_AUDIO\"", "\"app_version\":\"0.2.0\"", "\"device_name\":\"Acme TV\"", "\"render_mode\":\"VIDEO_AUDIO\"", "\"output_mode\":\"WLED\"", "\"effect\":\"FIRE\"", "\"brightness\":0.8", "\"sensitivity\":1.5", "\"fps\":24", "\"video_quality\":\"HIGH\"", "\"video_saturation_percent\":150", "\"wled_source_zones\":160", "\"speed\":2.0", "\"identity\":\"mac:AABBCCDDEEFF\"", "\"name\":\"TV strip\"", "\"calibration_status\":\"valid\"", "\"selected_hyperion_identity\":\"uuid:123e4567-e89b-12d3-a456-426614174000\"").forEach { assertTrue("Missing $it", attributes.contains(it)) }
         assertFalse(attributes.contains("192.168.1.152"))
-        assertFalse(attributes.contains("192.168.1.158"))
+        assertFalse(attributes.contains("192.168.0.158"))
         assertFalse(attributes.contains("realtimePort"))
     }
 
