@@ -60,10 +60,10 @@ class LiveTransitionPolicyTest {
         assertFalse(AudioSourceAdmissionPolicy.requiresNewAudioSource(RenderMode.VIDEO_AUDIO, RenderMode.VIDEO))
     }
 
-    @Test fun playbackAudioRetainsProjectionWhileOnlyAnimationMayReleaseIt() {
+    @Test fun everyLiveModeRetainsAnExistingProjectionForLaterSwitches() {
         assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.AUDIO)))
         assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.VIDEO)))
         assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.VIDEO_AUDIO)))
-        assertFalse(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.ANIMATION)))
+        assertTrue(ProjectionOwnershipPolicy.retainsProjection(RenderRequirements.forMode(RenderMode.ANIMATION)))
     }
 }

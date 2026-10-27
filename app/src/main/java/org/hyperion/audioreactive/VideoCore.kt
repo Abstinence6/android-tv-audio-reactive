@@ -246,9 +246,9 @@ object AudioSourceAdmissionPolicy {
         !requiresNewAudioSource(current, target) || recordAudioGranted
 }
 
-/** Playback capture is projection-backed even for audio-only rendering. */
+/** Once capture starts, preserve its one-shot projection token across every live renderer mode. */
 object ProjectionOwnershipPolicy {
-    fun retainsProjection(requirements: RenderRequirements): Boolean = requirements.audio || requirements.video
+    fun retainsProjection(requirements: RenderRequirements): Boolean = true
 }
 
 data class LocalTransitionRequest(val epoch: Long, val nonce: String, val target: RenderMode, val hasProjectionResult: Boolean)

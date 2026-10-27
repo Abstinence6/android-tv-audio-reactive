@@ -136,17 +136,11 @@ class AudioReactiveService : Service() {
      commit = {},
     )
     if(!needs.audio) releaseAudio()
-    // A MediaProjection token may create only one VirtualDisplay. Keep the display through
-    // AUDIO transitions and release it only when ANIMATION relinquishes the projection.
-    if(target==RenderMode.ANIMATION) releaseVideo()
-    // Playback capture remains projection-backed in AUDIO mode; only ANIMATION releases it.
-    if(!ProjectionOwnershipPolicy.retainsProjection(needs)) {
-     projection?.let { owned ->
-      // The projection callback is serialized with this gate and acknowledges this exact release.
-      if(lifecycle.releaseProjection(owned) { owned.stop() }) projection=null
-     }
-    }
-    // Re-apply after release so microphone/data-sync types cannot linger.
+    // Android permits each MediaProjection token to create only one VirtualDisplay. Once
+    // capture has started, retain that display and token in ANIMATION as well, so every
+    // later AUDIO/VIDEO/VIDEO_AUDIO switch remains live and does not need a new consent.
+    // An animation started before any capture still owns no projection.
+    // Re-apply after source release; a retained projection must keep the media-projection FGS type.
     setForegroundTypesFor(needs)
     gate.commit(target)
     committedRender=target
@@ -162,7 +156,8 @@ class AudioReactiveService : Service() {
   }
  }
  private fun setForegroundTypesFor(needs:RenderRequirements) {
-  val types=if(!needs.audio && !needs.video) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if(needs.audio && admittedSettings?.audioInput==AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+  val retainsProjection=projection!=null && ProjectionOwnershipPolicy.retainsProjection(needs)
+  val types=if(!retainsProjection && !needs.audio && !needs.video) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or (if(needs.audio && admittedSettings?.audioInput==AudioInput.MICROPHONE) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
   foregroundTypesRequested=types; startForeground(ID,notification(!needs.audio&&!needs.video),types)
  }
  private fun projectionCallback(owned:MediaProjection)=object:MediaProjection.Callback(){override fun onStop(){
@@ -175,7 +170,7 @@ class AudioReactiveService : Service() {
   }
   if(!s.requiresAudio()&&recorder!=null) releaseAudio()
   if(s.requiresVideo()&&reader==null&&!createVideo(p)) error("video source unavailable")
-  // Keep the existing VirtualDisplay while AUDIO is active; it is reused on a later VIDEO mode.
+  // Keep the existing VirtualDisplay through AUDIO and ANIMATION; it is reused on a later VIDEO mode.
   val next=when(s.renderMode){RenderMode.AUDIO->CaptureStatus.CAPTURE_ACTIVE_AUDIO;RenderMode.VIDEO->CaptureStatus.CAPTURE_ACTIVE_VIDEO;RenderMode.VIDEO_AUDIO->CaptureStatus.CAPTURE_ACTIVE_VIDEO_AUDIO;RenderMode.ANIMATION->CaptureStatus.CAPTURE_ACTIVE_ANIMATION}
   if(status!=next){status=next;LocalStatusStore.update(LocalStatusStore.snapshot().copy(captureStatus=next));broadcast()}
  }
