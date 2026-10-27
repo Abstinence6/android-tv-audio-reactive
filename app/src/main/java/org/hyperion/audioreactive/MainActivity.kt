@@ -517,6 +517,19 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
         MqttControlService.notifyDiagnosticChanged()
     }
 
+    private fun restoreCommittedCaptureModeUi() {
+        val visible = LiveRenderModeUiPolicy.checkboxes(effectiveRenderSettings().renderMode)
+        suppressModeCallbacks = true
+        audioBox.isChecked = visible.audioChecked
+        videoBox.isChecked = visible.videoChecked
+        animationBox.isChecked = visible.animationChecked
+        suppressModeCallbacks = false
+        rebuildEffectSelector()
+        refreshConditionalControls()
+        refreshCaptureUi()
+        MqttControlService.notifyDiagnosticChanged()
+    }
+
     private fun selectOutput(clicked: OutputMode, checked: Boolean) {
         if (AudioReactiveService.exists()) { renderOutputUi(); return }
         val current = RuntimeSettings.snapshot().outputMode
@@ -1008,7 +1021,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
                         pendingLocalTransition = null
                         dispatchLocalTransition(local, null)
                     }
-                } else pendingLocalTransition = null
+                } else { pendingLocalTransition = null; restoreCommittedCaptureModeUi() }
             } else pendingPermissionGeneration?.let { generation ->
                 pendingPermissionGeneration = null
                 captureToggleCoordinator.onRecordAudioPermissionResult(generation, grants.firstOrNull() == PackageManager.PERMISSION_GRANTED)
@@ -1022,6 +1035,7 @@ class MainActivity : Activity(), CaptureToggleCoordinator.Host {
             pendingLocalTransition?.let { target ->
                 pendingLocalTransition = null
                 if (result == Activity.RESULT_OK && data != null) dispatchLocalTransition(target, data)
+                else restoreCommittedCaptureModeUi()
                 return
             }
             pendingProjectionGeneration?.let { generation ->

@@ -8,6 +8,13 @@ object FrameSmoothingPolicy {
     fun immediateBlack(brightness: Float, signalPresent: Boolean?): Boolean = brightness == 0f || signalPresent == false
 }
 
+/** A non-blocking AudioRecord gap must eventually become silence, not a permanently stale effect. */
+object AudioFeatureFreshnessPolicy {
+    const val MAX_STALE_NANOS = 250_000_000L
+    fun isStale(lastAnalysisNanos: Long, nowNanos: Long) =
+        lastAnalysisNanos == 0L || nowNanos - lastAnalysisNanos >= MAX_STALE_NANOS
+}
+
 /** An explicit VIDEO_AUDIO toggle changes only silence behavior; protected/black source handling remains terminal. */
 object VideoAudioSilenceBrightnessPolicy {
     fun retainsVideo(settings: AudioSettings) = settings.renderMode == RenderMode.VIDEO_AUDIO &&

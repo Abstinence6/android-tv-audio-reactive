@@ -31,7 +31,7 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("lifecycle.acquire(\n     acquire = { (getSystemService"))
         assertTrue(source.contains("lifecycle.acquire(acquire={createAudio(p,s)}"))
         assertTrue(source.contains("lifecycle.acquire(acquire={ImageReader.newInstance"))
-        assertTrue(source.contains("lifecycle.acquire(acquire={p.createVirtualDisplay"))
+        assertTrue(source.contains("lifecycle.acquire(acquire={requireNotNull(p.createVirtualDisplay"))
         assertTrue(source.contains("lifecycle.acquire(acquire={ admission.consume"))
     }
 
@@ -51,7 +51,7 @@ class AudioReactiveServiceAdmissionSourceTest {
         assertTrue(source.contains("if(s.requiresAudio()&&recorder==null)"))
         assertTrue(source.contains("if(!s.requiresAudio()&&recorder!=null) releaseAudio()"))
         assertTrue(source.contains("if(s.requiresVideo()&&reader==null&&!createVideo(p)) error"))
-        assertTrue(source.contains("if(!s.requiresVideo()&&reader!=null) releaseVideo()"))
+        assertTrue(source.contains("Keep the existing VirtualDisplay while AUDIO is active"))
         assertTrue(source.contains("lifecycle.whileActive"))
         assertTrue(source.contains("frozen.requiresAudio()&&frozen.audioInput == AudioInput.MICROPHONE"))
         assertTrue(source.contains("foregroundTypesRequested=ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;startForeground(ID,notification(),foregroundTypesRequested)}"))
@@ -80,6 +80,6 @@ class AudioReactiveServiceAdmissionSourceTest {
         val projectionLookup = source.indexOf("val p=projection?:break", branch)
         assertTrue(branch >= 0 && projectionLookup > branch)
         assertTrue(source.substring(branch, projectionLookup).contains("animationRenderer.render"))
-        assertTrue(source.substring(branch, projectionLookup).contains("sendFrame(smoother.apply(raw),null"))
+        assertTrue(source.substring(branch, projectionLookup).contains("sendFrame(smoother.apply(raw,FrameSmoothingPolicy.immediateBlack(s.brightness,null)),null"))
     }
 }

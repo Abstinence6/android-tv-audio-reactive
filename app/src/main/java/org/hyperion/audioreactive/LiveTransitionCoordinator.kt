@@ -18,6 +18,7 @@ internal object TransitionDiagnostics {
 internal enum class TerminalCause {
     TRANSITION_EXCEPTION,
     UNEXPECTED_PROJECTION_REVOKE,
+    FOREGROUND_SERVICE_TIMEOUT,
     ROUTE_LOST,
     MICROPHONE_LOSS,
     EXPLICIT_STOP,
